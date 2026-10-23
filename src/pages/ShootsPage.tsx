@@ -8,6 +8,17 @@ import { workflowStages } from '../data'
 import { ButtonSpinner, Loader } from '../Spinner'
 import type { Shoot } from '../types'
 
+/**
+ * Crew count for a shoot. Prefer the synced `crewIds`, but fall back to the
+ * Crew Assign stage data so shoots assigned before `crewIds` syncing still
+ * show the right number.
+ */
+function crewCount(s: Shoot): number {
+  if (s.crewIds?.length) return s.crewIds.length
+  const assigns = s.stageFormData?.['Crew Assign']?.crewAssignments as unknown[] | undefined
+  return assigns?.length ?? 0
+}
+
 function ShootModal({
   open,
   onClose,
@@ -165,7 +176,7 @@ export function ShootsPage() {
                     <td><Badge tone="neutral">{s.type}</Badge></td>
                     <td>{s.date}<small>{s.time}</small></td>
                     <td>{s.venue}<small>{s.city}</small></td>
-                    <td>{s.crewIds?.length ?? 0} members</td>
+                    <td>{crewCount(s)} members</td>
                     <td><Badge tone={statusTone(s.currentStage)}>{s.currentStage}</Badge></td>
                     <td><Badge tone={statusTone(s.status)}>{s.status}</Badge></td>
                     <td>

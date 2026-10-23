@@ -13,6 +13,7 @@ export function SignupPage() {
 
   const [step, setStep] = useState<'register' | 'confirm'>('register')
   const [name, setName] = useState('')
+  const [handle, setHandle] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
@@ -27,8 +28,15 @@ export function SignupPage() {
     e.preventDefault()
     setError('')
     setInfo('')
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.')
+    // Must match the Cognito pool password policy (min 8 + upper + lower +
+    // number + symbol), else Cognito rejects the sign-up server-side.
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(password)) {
+      setError('Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a symbol.')
+      return
+    }
+    const handleTrimmed = handle.trim().toLowerCase()
+    if (!/^[a-z0-9._-]{3,30}$/.test(handleTrimmed)) {
+      setError('Username must be 3-30 characters: letters, numbers, dot, underscore or hyphen.')
       return
     }
     const phoneTrimmed = phone.trim()
@@ -38,7 +46,9 @@ export function SignupPage() {
     }
     setSubmitting(true)
     try {
-      const { username: newUsername } = await cognito.signUp(email.trim(), password, name.trim(), phoneTrimmed)
+      const { username: newUsername } = await cognito.signUp(
+        handleTrimmed, email.trim(), password, name.trim(), phoneTrimmed,
+      )
       setUsername(newUsername)
       setInfo(`We sent a verification code to ${email.trim()}.`)
       setStep('confirm')
@@ -103,6 +113,18 @@ export function SignupPage() {
                   required
                 />
               </FormField>
+              <FormField label="Username">
+                <input
+                  type="text"
+                  value={handle}
+                  onChange={e => setHandle(e.target.value)}
+                  placeholder="e.g. rahul_s"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  required
+                />
+              </FormField>
               <FormField label="Email">
                 <input
                   type="email"
@@ -127,7 +149,7 @@ export function SignupPage() {
                     type={showPw ? 'text' : 'password'}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    placeholder="At least 8 characters"
+                    placeholder="8+ chars, upper, lower, number & symbol"
                     required
                     style={{ width: '100%', paddingRight: 38 }}
                   />

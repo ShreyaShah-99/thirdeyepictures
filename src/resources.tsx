@@ -7,7 +7,7 @@
  * that used to live in data.ts.
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { crewApi, hardDrivesApi, sdCardsApi } from './api'
+import { crewApi, equipmentApi, hardDrivesApi, sdCardsApi, type Equipment } from './api'
 import { useAuth } from './auth'
 import type { CrewMember, HardDrive, SDCard } from './types'
 
@@ -15,8 +15,9 @@ interface ResourcesValue {
   members: CrewMember[]
   sdCards: SDCard[]
   hardDrives: HardDrive[]
+  equipment: Equipment[]
   loading: boolean
-  /** Re-fetch all three lists from the backend. */
+  /** Re-fetch all lists from the backend. */
   refresh: () => Promise<void>
 }
 
@@ -27,21 +28,24 @@ export function ResourcesProvider({ children }: { children: ReactNode }) {
   const [members, setMembers] = useState<CrewMember[]>([])
   const [sdCards, setSdCards] = useState<SDCard[]>([])
   const [hardDrives, setHardDrives] = useState<HardDrive[]>([])
+  const [equipment, setEquipment] = useState<Equipment[]>([])
   const [loading, setLoading] = useState(false)
 
   const refresh = async () => {
     setLoading(true)
     try {
-      const [crew, cards, drives] = await Promise.all([
+      const [crew, cards, drives, equip] = await Promise.all([
         crewApi.list(),
         sdCardsApi.list(),
         hardDrivesApi.list(),
+        equipmentApi.list(),
       ])
       // Guard against non-array responses (e.g. an error object) so consumers
       // can always safely call .find/.filter/.map on these.
       setMembers(Array.isArray(crew) ? crew : [])
       setSdCards(Array.isArray(cards) ? cards : [])
       setHardDrives(Array.isArray(drives) ? drives : [])
+      setEquipment(Array.isArray(equip) ? equip : [])
     } catch (err) {
       console.error('Failed to load resources:', err)
     } finally {
@@ -56,12 +60,13 @@ export function ResourcesProvider({ children }: { children: ReactNode }) {
       setMembers([])
       setSdCards([])
       setHardDrives([])
+      setEquipment([])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   return (
-    <ResourcesContext.Provider value={{ members, sdCards, hardDrives, loading, refresh }}>
+    <ResourcesContext.Provider value={{ members, sdCards, hardDrives, equipment, loading, refresh }}>
       {children}
     </ResourcesContext.Provider>
   )
@@ -78,6 +83,7 @@ export function useResources(): ResourcesValue {
       members: [],
       sdCards: [],
       hardDrives: [],
+      equipment: [],
       loading: false,
       refresh: async () => {},
     }

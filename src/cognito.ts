@@ -21,21 +21,19 @@ const userPool = new CognitoUserPool({
  * Register a new user in Cognito. Cognito emails them a verification code.
  * The account exists but must be confirmed (see confirmSignUp) before login.
  *
- * The pool is configured with email as an ALIAS (not the username), so the
- * username cannot be an email address. We generate a random UUID username and
- * store the email as an attribute — the alias lets the user log in with their
- * email afterwards.
+ * The pool uses a human-chosen handle as the real Cognito username (same as the
+ * existing `admin`/`shreya`/`thirdeye` accounts), with email as an ALIAS. So the
+ * user can sign in afterwards with EITHER their username OR their email.
+ * Usernames are case-insensitive in this pool, so we store the handle lowercase.
  */
 export function signUp(
+  username: string,
   email: string,
   password: string,
   name: string,
   phoneNumber?: string,
 ): Promise<{ username: string }> {
-  const username =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `u-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const handle = username.trim().toLowerCase()
 
   const attributes = [
     new CognitoUserAttribute({ Name: 'email', Value: email }),
@@ -46,11 +44,10 @@ export function signUp(
     attributes.push(new CognitoUserAttribute({ Name: 'phone_number', Value: phoneNumber }))
   }
   return new Promise((resolve, reject) => {
-    userPool.signUp(username, password, attributes, [], (err, result) => {
+    userPool.signUp(handle, password, attributes, [], (err, result) => {
       if (err) return reject(err)
-      // Because email is an alias, confirmation must target the REAL username
-      // (the UUID), not the email. Return it so confirmSignUp can use it.
-      resolve({ username: result?.user.getUsername() ?? username })
+      // The handle IS the username; confirmation targets it directly.
+      resolve({ username: result?.user.getUsername() ?? handle })
     })
   })
 }
@@ -111,12 +108,31 @@ function profileFromSession(session: CognitoUserSession): CognitoProfile {
 }
 
 /**
- * Log in with email + password.
+ * Normalize a login identifier. The pool accepts several values in the username
+ * slot, resolved case-insensitively:
+ *   - username   (the handle chosen at sign-up, e.g. "thirdeye")
+ *   - email      (alias, e.g. you@thirdeye.in)
+ *   - phone_number in E.164 (e.g. +919876543210)
+ * Usernames/emails are lowercased (this pool is case-insensitive); phone-like
+ * input has spaces/dashes stripped so "+91 98765 43210" still resolves.
+ */
+function normalizeIdentifier(raw: string): string {
+  const id = raw.trim()
+  // Phone-like: starts with + or is all digits/space/dash/paren.
+  if (/^\+?[\d\s()-]+$/.test(id)) {
+    return id.replace(/[\s()-]/g, '')
+  }
+  // Otherwise treat as email/username — emails are case-insensitive in Cognito.
+  return id.toLowerCase()
+}
+
+/**
+ * Log in with an identifier (email or phone-number alias) + password.
  * If Cognito requires a new password (first login), the returned object
  * has `newPasswordRequired: true` and a `completeNewPassword` callback.
  */
 export function login(
-  email: string,
+  identifier: string,
   password: string
 ): Promise<
   | { profile: CognitoProfile; newPasswordRequired?: false }
@@ -125,8 +141,9 @@ export function login(
       completeNewPassword: (newPassword: string, attrs?: NewPasswordAttrs) => Promise<CognitoProfile>
     }
 > {
-  const user = new CognitoUser({ Username: email, Pool: userPool })
-  const authDetails = new AuthenticationDetails({ Username: email, Password: password })
+  const username = normalizeIdentifier(identifier)
+  const user = new CognitoUser({ Username: username, Pool: userPool })
+  const authDetails = new AuthenticationDetails({ Username: username, Password: password })
 
   return new Promise((resolve, reject) => {
     user.authenticateUser(authDetails, {

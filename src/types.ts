@@ -33,9 +33,14 @@ export interface SDCard {
   brand: string
   capacity: string
   serial: string
-  status: 'Available' | 'Assigned' | 'In Use' | 'Data Copy Pending' | 'Data Copied' | 'Damaged' | 'Lost' | 'Retired'
+  status: 'Available' | 'Assigned' | 'In Use' | 'Data Copy Pending' | 'Data Copied' | 'Borrowed' | 'Damaged' | 'Lost' | 'Retired'
   currentShootId?: string
   history: { shootId: string; shootName: string; date: string; member: string }[]
+  /** Borrow tracking — set while status is 'Borrowed', cleared on return. */
+  borrowedBy?: string
+  pickupDate?: string
+  returnDate?: string
+  borrowNotes?: string
 }
 
 export interface HardDriveShoot {
@@ -108,17 +113,20 @@ export interface Shoot {
   }
   /** Submitted form data keyed by stage name */
   stageFormData?: Partial<Record<WorkflowStage, Record<string, unknown>>>
+  createdAt?: string
+  /** Bumped by the backend on every update — used to force UI remounts after a save */
+  updatedAt?: string
 }
 
 // Per-stage form data stored after submission
 export interface InquiryFormData {
-  clientName: string; email: string; phone: string; eventType: string; eventDate: string; budget: string; message: string
+  eventName: string; clientName: string; email: string; phone: string; eventType: string; eventDate: string; eventTime: string; budget: string; message: string
 }
 export interface ConfirmFormData {
   contractSigned: boolean; advancePaid: string; advanceDate: string; notes: string
 }
 export interface ScheduleFormData {
-  shootDate: string; startTime: string; endTime: string; venue: string; city: string; notes: string
+  shootDate: string; startTime: string; endTime: string; venue: string; city: string; mapLink: string; notes: string
 }
 export interface CrewAssignFormData {
   crewIds: string[]; notes: string

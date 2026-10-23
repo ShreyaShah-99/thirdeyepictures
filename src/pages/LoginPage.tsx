@@ -10,7 +10,7 @@ export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
 
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState('')
@@ -29,7 +29,7 @@ export function LoginPage() {
     setError('')
     setSubmitting(true)
     try {
-      const res = await login(email.trim(), password)
+      const res = await login(identifier.trim(), password)
       if (res.ok) {
         navigate('/')
       } else if ('newPasswordRequired' in res && res.newPasswordRequired) {
@@ -37,9 +37,9 @@ export function LoginPage() {
         setCompleteNewPassword(() => res.completeNewPassword)
         setNeedNewPassword(true)
       } else if ('error' in res) {
-        setError(res.error ?? 'Invalid email or password.')
+        setError(res.error ?? 'Invalid credentials.')
       } else {
-        setError('Invalid email or password.')
+        setError('Invalid credentials.')
       }
     } finally {
       setSubmitting(false)
@@ -73,16 +73,19 @@ export function LoginPage() {
 
         {!needNewPassword ? (
           <>
-            <h1>Welcome back</h1>
-            <p>Sign in to your production workspace.</p>
+            <h1>Capturing Love Beyond Vision</h1>
+            <p>Sign in to TEAM, Together Everyone Archieves More..</p>
 
             <form onSubmit={handleSubmit} style={{ marginTop: 18 }}>
-              <FormField label="Email">
+              <FormField label="Username or Email">
                 <input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="you@thirdeye.in"
+                  type="text"
+                  value={identifier}
+                  onChange={e => setIdentifier(e.target.value)}
+                  placeholder="username or you@thirdeye.in"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   required
                 />
               </FormField>

@@ -1,6 +1,6 @@
-import { ClipboardList, Plus, Trash2, X } from 'lucide-react'
+import { CheckCircle2, Circle, ClipboardList, Clock, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { tasksApi, type Task } from '../api'
+import { activityApi, tasksApi, type Task } from '../api'
 import { useAuth, useCanWrite } from '../auth'
 import { AppLayout, Badge, FormField, Modal, PageHeader, SearchFilter } from '../components'
 import { useResources } from '../resources'
@@ -37,6 +37,7 @@ function CreateTaskModal({ open, onClose, onAdd }: {
     setSaving(true)
     try {
       const created = await tasksApi.create({ ...form, status: 'Pending' })
+      activityApi.log(`Task created: ${created.title}`).catch(() => {})
       onAdd(created)
       setForm(blank)
       onClose()
@@ -84,6 +85,81 @@ function CreateTaskModal({ open, onClose, onAdd }: {
   )
 }
 
+// ─── Edit Task Modal ──────────────────────────────────────────────────────────
+function EditTaskModal({ task, onClose, onSave }: {
+  task: Task | null; onClose: () => void; onSave: (id: string, patch: Partial<Task>) => Promise<void>
+}) {
+  const { members } = useResources()
+  const [form, setForm] = useState<Partial<Task>>({})
+  const [saving, setSaving] = useState(false)
+
+  // Re-seed the form whenever a new task is opened for editing.
+  useEffect(() => {
+    if (task) setForm({ ...task })
+  }, [task])
+
+  const set = (k: keyof Task) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const submit = async () => {
+    if (!task || !form.title) return
+    setSaving(true)
+    try {
+      await onSave(task.id, {
+        title: form.title,
+        description: form.description,
+        assignedTo: form.assignedTo,
+        priority: form.priority,
+        dueDate: form.dueDate,
+        type: form.type,
+      })
+      onClose()
+    } catch (err: any) {
+      alert(`Failed to update task: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open={!!task} title="Edit Task" onClose={onClose}>
+      <div className="form-grid">
+        <FormField label="Title">
+          <input value={form.title ?? ''} onChange={set('title')} placeholder="Task title" />
+        </FormField>
+        <FormField label="Type">
+          <select value={form.type ?? 'General'} onChange={set('type')}>
+            {(['Sorting','Editing','Data Copy','Delivery','General'] as TaskType[]).map(t => <option key={t}>{t}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Assign To">
+          <select value={form.assignedTo ?? ''} onChange={set('assignedTo')}>
+            <option value="">Select member</option>
+            {members.map(m => <option key={m.id} value={m.name}>{m.name} — {m.role}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Priority">
+          <select value={form.priority ?? 'Normal'} onChange={set('priority')}>
+            {(['Low','Normal','High','Urgent'] as TaskPriority[]).map(p => <option key={p}>{p}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Due Date">
+          <input type="date" value={form.dueDate ?? ''} onChange={set('dueDate')} />
+        </FormField>
+      </div>
+      <FormField label="Description">
+        <textarea rows={3} value={form.description ?? ''} onChange={set('description')} placeholder="What needs to be done?" />
+      </FormField>
+      <div className="modal-actions">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={submit} disabled={saving || !form.title}>
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Tasks Page ───────────────────────────────────────────────────────────────
 export function TasksPage() {
   const { user } = useAuth()
@@ -94,6 +170,7 @@ export function TasksPage() {
   const [tasks, setTasks]           = useState<Task[]>([])
   const [loading, setLoading]       = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<Task | null>(null)
   const [memberFilter, setMemberFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch]         = useState('')
@@ -110,10 +187,19 @@ export function TasksPage() {
     const matchMember = !memberFilter || t.assignedTo === memberFilter
     const matchStatus = !statusFilter || t.status === statusFilter
     const matchSearch = !search ||
-      t.title.toLowerCase().includes(search.toLowerCase()) ||
-      t.assignedTo.toLowerCase().includes(search.toLowerCase())
+      (t.title ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (t.assignedTo ?? '').toLowerCase().includes(search.toLowerCase())
     return matchMember && matchStatus && matchSearch
   })
+
+  // Summary stat cards (match the inventory pages).
+  const countStatus = (s: TaskStatus) => tasks.filter(t => t.status === s).length
+  const taskStats = [
+    { label: 'Pending',     icon: Circle,      tone: '#8b8380', bg: '#f1ece9', value: countStatus('Pending') },
+    { label: 'In Progress', icon: Clock,       tone: '#d98324', bg: '#fbefe0', value: countStatus('In Progress') },
+    { label: 'Completed',   icon: CheckCircle2,tone: '#2e9e5b', bg: '#e8f6ee', value: countStatus('Completed') },
+    { label: 'Total',       icon: ClipboardList,tone: '#2f6fb0', bg: '#e8f0fa', value: tasks.length },
+  ]
 
   const cycleStatus = async (id: string) => {
     const task = tasks.find(t => t.id === id)
@@ -122,6 +208,7 @@ export function TasksPage() {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status: newStatus } : t))
     try {
       await tasksApi.update(id, { status: newStatus })
+      activityApi.log(`Task "${task.title}" marked ${newStatus}`).catch(() => {})
     } catch (err: any) {
       // revert on failure
       setTasks(prev => prev.map(t => t.id === id ? { ...t, status: task.status } : t))
@@ -133,6 +220,12 @@ export function TasksPage() {
     try {
       await tasksApi.remove(id)
     } catch {}
+  }
+
+  const saveEdit = async (id: string, patch: Partial<Task>) => {
+    const updated = await tasksApi.update(id, patch)
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updated } : t))
+    activityApi.log(`Task updated: ${updated.title ?? patch.title ?? ''}`).catch(() => {})
   }
 
   const clearFilters = () => { setMemberFilter(''); setStatusFilter(''); setSearch('') }
@@ -161,7 +254,7 @@ export function TasksPage() {
           className="select"
           value={memberFilter}
           onChange={e => setMemberFilter(e.target.value)}
-          style={{ height: 35, fontSize: 11 }}
+          style={{ height: 44, fontSize: 12, borderRadius: 10 }}
         >
           <option value="">All Members</option>
           {allMemberNames.map(name => (
@@ -174,7 +267,7 @@ export function TasksPage() {
           className="select"
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          style={{ height: 35, fontSize: 11 }}
+          style={{ height: 44, fontSize: 12, borderRadius: 10 }}
         >
           <option value="">All Status</option>
           {(['Pending','In Progress','Completed'] as TaskStatus[]).map(s =>
@@ -190,94 +283,108 @@ export function TasksPage() {
         )}
       </div>
 
-      {/* ── Task count ── */}
-      {hasFilters && (
-        <p style={{ fontSize: 11, color: '#938b87', marginBottom: 12 }}>
-          Showing {filtered.length} of {tasks.length} tasks
-        </p>
-      )}
-
-      {/* ── Loading ── */}
-      {loading && (
-        <p style={{ textAlign: 'center', padding: '48px 0', color: '#938b87', fontSize: 13 }}>Loading tasks...</p>
-      )}
-
-      {/* ── Empty state ── */}
-      {!loading && filtered.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '48px 0', color: '#938b87' }}>
-          <ClipboardList size={32} style={{ marginBottom: 12, opacity: 0.4 }} />
-          <div style={{ fontSize: 14, fontWeight: 600 }}>
-            {hasFilters ? 'No tasks match the filters' : 'No tasks yet'}
-          </div>
-          <div style={{ fontSize: 12, marginTop: 4 }}>
-            {hasFilters ? 'Try changing the filters above.' : 'Create a task to get started.'}
-          </div>
-        </div>
-      )}
-
-      {/* ── Task cards ── */}
-      <div className="resource-grid" style={{ marginTop: 4 }}>
-        {filtered.map(task => (
-          <div key={task.id} className="resource-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
-              <Badge tone="info">{task.type}</Badge>
-              <Badge tone={PRIORITY_TONE[task.priority]}>{task.priority}</Badge>
-              <div style={{ flex: 1 }} />
-              {isSuperAdmin && (
-                <button type="button" className="icon-btn delete-btn" title="Delete task" onClick={() => deleteTask(task.id)}>
-                  <Trash2 size={14} />
-                </button>
-              )}
+      {/* ── Summary stat cards ── */}
+      <div className="inv-stats">
+        {taskStats.map(s => (
+          <div className="inv-stat" key={s.label}>
+            <div className="inv-stat-icon" style={{ background: s.bg, color: s.tone }}>
+              <s.icon size={18} />
             </div>
-
-            {/* Title */}
-            <div style={{ fontWeight: 600, fontSize: 13 }}>{task.title}</div>
-
-            {/* Description */}
-            {task.description && (
-              <div style={{ fontSize: 11, color: '#888', lineHeight: 1.4 }}>{task.description}</div>
-            )}
-
-            {/* Meta */}
-            <div style={{ fontSize: 11, color: '#625b58', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {task.assignedTo && (
-                <button
-                  type="button"
-                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: memberFilter === task.assignedTo ? 'var(--primary)' : '#625b58', fontWeight: memberFilter === task.assignedTo ? 700 : 400, fontSize: 11 }}
-                  onClick={() => setMemberFilter(prev => prev === task.assignedTo ? '' : task.assignedTo)}
-                  title={`Filter by ${task.assignedTo}`}
-                >
-                  👤 {task.assignedTo}
-                </button>
-              )}
-              {task.dueDate && <span>📅 {task.dueDate}</span>}
+            <div>
+              <span>{s.label}</span>
+              <strong>{s.value}</strong>
             </div>
-
-            {/* Status toggle (writers only; viewers just see the badge) */}
-            {canWrite ? (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ fontSize: 11, padding: '3px 10px', marginTop: 2 }}
-                onClick={() => cycleStatus(task.id)}
-              >
-                <Badge tone={STATUS_TONE[task.status]}>{task.status}</Badge>
-                <span style={{ marginLeft: 6, color: '#625b58' }}>→ {STATUS_CYCLE[task.status]}</span>
-              </button>
-            ) : (
-              <div style={{ marginTop: 2 }}>
-                <Badge tone={STATUS_TONE[task.status]}>{task.status}</Badge>
-              </div>
-            )}
           </div>
         ))}
       </div>
+
+      <section className="card">
+        {/* ── Loading ── */}
+        {loading && (
+          <p style={{ textAlign: 'center', padding: '48px 0', color: '#938b87', fontSize: 13 }}>Loading tasks...</p>
+        )}
+
+        {!loading && (
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Type</th>
+                  <th>Assignee</th>
+                  <th>Priority</th>
+                  <th>Due</th>
+                  <th>Status</th>
+                  {canWrite && <th className="inv-action-col">Action</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(task => (
+                  <tr key={task.id}>
+                    <td>
+                      <div className="inv-name">{task.title}</div>
+                      {task.description && <div className="inv-serial">{task.description}</div>}
+                    </td>
+                    <td>{task.type}</td>
+                    <td>{task.assignedTo || '—'}</td>
+                    <td><Badge tone={PRIORITY_TONE[task.priority]}>{task.priority}</Badge></td>
+                    <td>{task.dueDate || '—'}</td>
+                    <td>
+                      {canWrite ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: 11, padding: '3px 10px' }}
+                          title={`Mark ${STATUS_CYCLE[task.status]}`}
+                          onClick={() => cycleStatus(task.id)}
+                        >
+                          <Badge tone={STATUS_TONE[task.status]}>{task.status}</Badge>
+                        </button>
+                      ) : (
+                        <Badge tone={STATUS_TONE[task.status]}>{task.status}</Badge>
+                      )}
+                    </td>
+                    {canWrite && (
+                      <td className="inv-action-col">
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                          <button type="button" className="icon-btn" title="Edit task" onClick={() => setEditTarget(task)}>
+                            <Pencil size={14} />
+                          </button>
+                          {isSuperAdmin && (
+                            <button type="button" className="icon-btn delete-btn" title="Delete task" onClick={() => deleteTask(task.id)}>
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={canWrite ? 7 : 6} style={{ padding: '40px 0', textAlign: 'center', color: '#938b87' }}>
+                      <ClipboardList size={28} style={{ opacity: 0.4, display: 'block', margin: '0 auto 8px' }} />
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{hasFilters ? 'No tasks match the filters' : 'No tasks yet'}</div>
+                      <div style={{ fontSize: 12, marginTop: 2 }}>{hasFilters ? 'Try changing the filters above.' : 'Create a task to get started.'}</div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <CreateTaskModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onAdd={t => setTasks(prev => [t, ...prev])}
+      />
+
+      <EditTaskModal
+        task={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSave={saveEdit}
       />
     </AppLayout>
   )

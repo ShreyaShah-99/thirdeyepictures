@@ -35,7 +35,7 @@ type LoginResult =
 interface AuthContextValue {
   user: AuthUser | null
   loading: boolean
-  login: (email: string, password: string) => Promise<LoginResult>
+  login: (identifier: string, password: string) => Promise<LoginResult>
   logout: () => void
   /** Re-fetch access level (e.g. after an admin adds the user to a team). */
   refreshAccess: () => Promise<void>
@@ -95,9 +95,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [])
 
-  const login = async (email: string, password: string): Promise<LoginResult> => {
+  const login = async (identifier: string, password: string): Promise<LoginResult> => {
     try {
-      const res = await cognito.login(email, password)
+      const res = await cognito.login(identifier, password)
       if ('newPasswordRequired' in res && res.newPasswordRequired) {
         return {
           ok: false,

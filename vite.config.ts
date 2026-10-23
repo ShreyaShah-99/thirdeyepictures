@@ -5,15 +5,23 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // Proxy all /api calls to the local backend — avoids CORS entirely in dev.
-      // serverless-offline binds only to the IPv6 loopback (::1) on Windows, so
-      // target it explicitly. Using "localhost" can resolve to IPv4 (127.0.0.1),
-      // where nothing is listening — the proxy then falls through and serves
-      // index.html (HTML), causing "Unexpected token '<' ... is not valid JSON".
+      // Proxy all /api calls server-side so the browser makes only same-origin
+      // requests (no CORS preflight). This also dodges any corporate proxy / VPN
+      // / antivirus on the browser's network path that rewrites OPTIONS preflight
+      // responses (e.g. dropping PATCH from Access-Control-Allow-Methods).
+      //
+      // Default: forward to the deployed AWS backend — no local backend needed.
       '/api': {
-        target: 'http://[::1]:3000',
+        target: 'https://xfcgfugil4.execute-api.ap-south-1.amazonaws.com',
         changeOrigin: true,
       },
+
+      // Alternative: run the local serverless-offline backend instead, then use
+      // this target. serverless-offline binds only to the IPv6 loopback (::1) on
+      // Windows, so target it explicitly — "localhost" can resolve to IPv4
+      // (127.0.0.1) where nothing listens, and the proxy then serves index.html
+      // (HTML), causing "Unexpected token '<' ... is not valid JSON".
+      //   target: 'http://[::1]:3000',
     },
   },
 })

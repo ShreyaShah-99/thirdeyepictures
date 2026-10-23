@@ -1,13 +1,11 @@
-import { Database, HardDrive, ListFilter, Package, Plus, ShieldOff, Trash2, Users } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, Package, Pencil, Plus, ShieldOff, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { crewApi, equipmentApi, hardDrivesApi, sdCardsApi, usersApi, type Equipment, type RegisteredUser } from '../api'
+import { activityApi, crewApi, equipmentApi, hardDrivesApi, sdCardsApi, shootsApi, usersApi, type Equipment, type RegisteredUser } from '../api'
 import { useAuth, useCanDo, useCanWrite } from '../auth'
 import { AppLayout, Badge, FormField, Modal, PageHeader, SearchFilter, statusTone } from '../components'
 import { ButtonSpinner, Loader } from '../Spinner'
 import type { CrewMember, HardDrive as HardDriveType, SDCard } from '../types'
-
-const CREW_ROLES = ['Photographer', 'Videographer', 'Cinematographer', 'Lead Photographer', 'Assistant', 'Data Manager', 'Editor', 'Other']
 
 // ─── Add Member Modal ─────────────────────────────────────────────────────────
 // Admin picks from users who have self-registered in Cognito. Choosing a
@@ -24,9 +22,13 @@ function AddMemberModal({ open, onClose, onAdd, existingEmails }: {
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [usersError, setUsersError] = useState('')
   const [selected, setSelected] = useState('') // username
-  const [role, setRole] = useState('Photographer')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
+  // 'registered' = pick from Cognito users; 'manual' = admin types an unregistered name.
+  const [mode, setMode] = useState<'registered' | 'manual'>('registered')
+  const [manualName, setManualName] = useState('')
+  const [manualEmail, setManualEmail] = useState('')
+  const [manualPhone, setManualPhone] = useState('')
 
   // Load registered users whenever the modal opens.
   useEffect(() => {
@@ -40,24 +42,45 @@ function AddMemberModal({ open, onClose, onAdd, existingEmails }: {
   }, [open])
 
   // Only users not already on the team.
-  const already = new Set(existingEmails.map(e => e.toLowerCase()))
+  const already = new Set(existingEmails.filter(Boolean).map(e => e.toLowerCase()))
   const options = registered.filter(u => u.email && !already.has(u.email.toLowerCase()))
   const chosen = registered.find(u => u.username === selected)
 
+  const reset = () => {
+    setSelected(''); setNotes(''); setMode('registered')
+    setManualName(''); setManualEmail(''); setManualPhone('')
+  }
+
+  const canSubmit = mode === 'registered' ? !!chosen : !!manualName.trim()
+
   const submit = async () => {
-    if (!chosen) return
+    if (!canSubmit) return
     setSaving(true)
     try {
-      await onAdd({
-        id: `m-${Date.now()}`,
-        name: chosen.name || chosen.email,
-        email: chosen.email,
-        phone: chosen.phone,
-        role,
-        availability: 'Available',
-        shoots: 0,
-      })
-      setSelected(''); setRole('Photographer'); setNotes('')
+      // Role isn't chosen here anymore — default it; the per-shoot Crew Assign
+      // stage is where a role is picked for a given production.
+      const member: CrewMember =
+        mode === 'registered' && chosen
+          ? {
+              id: `m-${Date.now()}`,
+              name: chosen.name || chosen.email,
+              email: chosen.email,
+              phone: chosen.phone,
+              role: 'Other',
+              availability: 'Available',
+              shoots: 0,
+            }
+          : {
+              id: `m-${Date.now()}`,
+              name: manualName.trim(),
+              email: manualEmail.trim(),
+              phone: manualPhone.trim(),
+              role: 'Other',
+              availability: 'Available',
+              shoots: 0,
+            }
+      await onAdd(member)
+      reset()
       onClose()
     } catch (err: any) {
       alert(`Failed to add member: ${err.message}`)
@@ -68,44 +91,67 @@ function AddMemberModal({ open, onClose, onAdd, existingEmails }: {
 
   return (
     <Modal open={open} title="Add Team Member" onClose={onClose}>
-      <FormField label="Registered User">
-        {loadingUsers ? (
-          <p style={{ fontSize: 12, color: '#938b87', margin: 0 }}>Loading registered users...</p>
-        ) : (
-          <select value={selected} onChange={e => setSelected(e.target.value)}>
-            <option value="">Select a registered user</option>
-            {options.map(u => (
-              <option key={u.username} value={u.username}>
-                {u.name ? `${u.name} — ${u.email}` : u.email} ({u.status})
-              </option>
-            ))}
-          </select>
-        )}
-      </FormField>
-
-      {!loadingUsers && options.length === 0 && !usersError && (
-        <p style={{ fontSize: 12, color: '#938b87', marginTop: -4 }}>
-          No registered users available. New users must sign up first at the login screen.
-        </p>
-      )}
-      {usersError && <p style={{ fontSize: 12, color: 'crimson', marginTop: -4 }}>{usersError}</p>}
-
-      {chosen && (
-        <div className="form-grid" style={{ marginTop: 4 }}>
-          <FormField label="Email">
-            <input value={chosen.email} disabled />
-          </FormField>
-          <FormField label="Phone">
-            <input value={chosen.phone || '—'} disabled />
-          </FormField>
-        </div>
-      )}
-
-      <FormField label="Role">
-        <select value={role} onChange={e => setRole(e.target.value)}>
-          {CREW_ROLES.map(r => <option key={r}>{r}</option>)}
+      {/* Registered vs unregistered toggle */}
+      <FormField label="Member Type">
+        <select value={mode} onChange={e => setMode(e.target.value as 'registered' | 'manual')}>
+          <option value="registered">Registered user</option>
+          <option value="manual">Unregistered (enter name)</option>
         </select>
       </FormField>
+
+      {mode === 'registered' ? (
+        <>
+          <FormField label="Registered User">
+            {loadingUsers ? (
+              <p style={{ fontSize: 12, color: '#938b87', margin: 0 }}>Loading registered users...</p>
+            ) : (
+              <select value={selected} onChange={e => setSelected(e.target.value)}>
+                <option value="">Select a registered user</option>
+                {options.map(u => (
+                  <option key={u.username} value={u.username}>
+                    {u.name ? `${u.name} — ${u.email}` : u.email} ({u.status})
+                  </option>
+                ))}
+              </select>
+            )}
+          </FormField>
+
+          {!loadingUsers && options.length === 0 && !usersError && (
+            <p style={{ fontSize: 12, color: '#938b87', marginTop: -4 }}>
+              No registered users available. New users must sign up first at the login screen.
+            </p>
+          )}
+          {usersError && <p style={{ fontSize: 12, color: 'crimson', marginTop: -4 }}>{usersError}</p>}
+
+          {chosen && (
+            <div className="form-grid" style={{ marginTop: 4 }}>
+              <FormField label="Email">
+                <input value={chosen.email} disabled />
+              </FormField>
+              <FormField label="Phone">
+                <input value={chosen.phone || '—'} disabled />
+              </FormField>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <FormField label="Name">
+            <input value={manualName} onChange={e => setManualName(e.target.value)} placeholder="Full name" />
+          </FormField>
+          <div className="form-grid">
+            <FormField label="Email (optional)">
+              <input type="email" value={manualEmail} onChange={e => setManualEmail(e.target.value)} placeholder="email@example.com" />
+            </FormField>
+            <FormField label="Phone (optional)">
+              <input value={manualPhone} onChange={e => setManualPhone(e.target.value)} placeholder="+91 00000 00000" />
+            </FormField>
+          </div>
+          <p style={{ fontSize: 11, color: '#938b87', marginTop: -4 }}>
+            This member isn't a registered account. They won't be able to log in until they sign up.
+          </p>
+        </>
+      )}
 
       <FormField label="Notes">
         <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Any notes about this member..." />
@@ -113,7 +159,7 @@ function AddMemberModal({ open, onClose, onAdd, existingEmails }: {
 
       <div className="modal-actions">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="button" className="btn btn-primary" onClick={submit} disabled={saving || !chosen}>
+        <button type="button" className="btn btn-primary" onClick={submit} disabled={saving || !canSubmit}>
           {saving ? <><ButtonSpinner /> Adding...</> : <><Plus size={14} /> Add Member</>}
         </button>
       </div>
@@ -326,6 +372,175 @@ function DeleteConfirmModal({ open, name, onClose, onConfirm }: {
   )
 }
 
+// ─── Edit Resource Modal (SD card / hard drive / equipment) ───────────────────
+const SD_STATUSES = ['Available','Assigned','In Use','Data Copy Pending','Data Copied','Damaged','Lost','Retired']
+const HD_STATUSES = ['Available','In Use','Full','Backup Pending','Backup Completed','Damaged','Lost','Retired']
+const EQUIP_STATUSES = ['Available','In Use','Under Repair','Retired']
+const EQUIP_TYPES = ['Camera Body','Lens','Light','Audio','Stabilizer','Drone','Accessory','Other']
+const SD_CAPACITIES = ['32 GB','64 GB','128 GB','256 GB','512 GB','1 TB']
+const HD_BRANDS = ['Samsung','WD','Seagate','LaCie','SanDisk','Toshiba']
+
+function EditResourceModal({ kind, item, onClose, onSave }: {
+  kind: 'sd' | 'hard' | 'equipment'
+  item: any | null
+  onClose: () => void
+  onSave: (id: string, patch: any) => Promise<void>
+}) {
+  const [form, setForm] = useState<any>({})
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { if (item) setForm({ ...item }) }, [item])
+
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm((f: any) => ({ ...f, [k]: e.target.value }))
+
+  const submit = async () => {
+    if (!item) return
+    setSaving(true)
+    try {
+      let patch: any
+      if (kind === 'sd') {
+        patch = { number: form.number, capacity: form.capacity, owner: form.owner, status: form.status }
+      } else if (kind === 'hard') {
+        patch = { name: form.name, brand: form.brand, capacity: Number(form.capacity), owner: form.owner, location: form.location, status: form.status }
+      } else {
+        patch = { name: form.name, type: form.type, owner: form.owner, status: form.status }
+      }
+      await onSave(item.id, patch)
+      onClose()
+    } catch (err: any) {
+      alert(`Failed to update: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const title = kind === 'sd' ? 'Edit SD Card' : kind === 'hard' ? 'Edit Hard Drive' : 'Edit Equipment'
+
+  return (
+    <Modal open={!!item} title={title} onClose={onClose}>
+      <div className="form-grid">
+        {kind === 'sd' && (
+          <>
+            <FormField label="Card Number"><input value={form.number ?? ''} onChange={set('number')} /></FormField>
+            <FormField label="Capacity">
+              <select value={form.capacity ?? '128 GB'} onChange={set('capacity')}>
+                {SD_CAPACITIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Owner"><input value={form.owner ?? ''} onChange={set('owner')} /></FormField>
+            <FormField label="Status">
+              <select value={form.status ?? 'Available'} onChange={set('status')}>
+                {SD_STATUSES.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </FormField>
+          </>
+        )}
+        {kind === 'hard' && (
+          <>
+            <FormField label="Drive Name"><input value={form.name ?? ''} onChange={set('name')} /></FormField>
+            <FormField label="Brand">
+              <select value={form.brand ?? 'Samsung'} onChange={set('brand')}>
+                {HD_BRANDS.map(b => <option key={b}>{b}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Capacity (TB)"><input type="number" value={form.capacity ?? 0} onChange={set('capacity')} /></FormField>
+            <FormField label="Location"><input value={form.location ?? ''} onChange={set('location')} /></FormField>
+            <FormField label="Owner"><input value={form.owner ?? ''} onChange={set('owner')} /></FormField>
+            <FormField label="Status">
+              <select value={form.status ?? 'Available'} onChange={set('status')}>
+                {HD_STATUSES.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </FormField>
+          </>
+        )}
+        {kind === 'equipment' && (
+          <>
+            <FormField label="Equipment Name"><input value={form.name ?? ''} onChange={set('name')} /></FormField>
+            <FormField label="Type">
+              <select value={form.type ?? 'Other'} onChange={set('type')}>
+                {EQUIP_TYPES.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Owner"><input value={form.owner ?? ''} onChange={set('owner')} /></FormField>
+            <FormField label="Status">
+              <select value={form.status ?? 'Available'} onChange={set('status')}>
+                {EQUIP_STATUSES.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </FormField>
+          </>
+        )}
+      </div>
+      <div className="modal-actions">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={submit} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+// ─── Borrow Modal (SD card / equipment) ───────────────────────────────────────
+function BorrowModal({ kind, item, onClose, onBorrow }: {
+  kind: 'sd' | 'equipment'
+  item: any | null
+  onClose: () => void
+  onBorrow: (id: string, patch: any) => Promise<void>
+}) {
+  const blank = { borrowedBy: '', pickupDate: '', returnDate: '', borrowNotes: '' }
+  const [form, setForm] = useState(blank)
+  const [saving, setSaving] = useState(false)
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }))
+
+  useEffect(() => { if (item) setForm(blank) }, [item]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submit = async () => {
+    if (!item || !form.borrowedBy.trim()) return
+    setSaving(true)
+    try {
+      await onBorrow(item.id, {
+        status: 'Borrowed',
+        borrowedBy: form.borrowedBy.trim(),
+        pickupDate: form.pickupDate,
+        returnDate: form.returnDate,
+        borrowNotes: form.borrowNotes,
+      })
+      onClose()
+    } catch (err: any) {
+      alert(`Failed to record borrow: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open={!!item} title={`Borrow ${kind === 'sd' ? 'SD Card' : 'Equipment'}`} onClose={onClose}>
+      <FormField label="Borrowed By">
+        <input value={form.borrowedBy} onChange={set('borrowedBy')} placeholder="Name of person borrowing" />
+      </FormField>
+      <div className="form-grid">
+        <FormField label="Pickup Date">
+          <input type="date" value={form.pickupDate} onChange={set('pickupDate')} />
+        </FormField>
+        <FormField label="Expected Return Date">
+          <input type="date" value={form.returnDate} onChange={set('returnDate')} />
+        </FormField>
+      </div>
+      <FormField label="Notes">
+        <textarea rows={3} value={form.borrowNotes} onChange={set('borrowNotes')} placeholder="Reason, condition, contact, etc." />
+      </FormField>
+      <div className="modal-actions">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={submit} disabled={saving || !form.borrowedBy.trim()}>
+          {saving ? 'Saving...' : 'Mark as Borrowed'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export function SimpleResourcePage({
   title,
@@ -342,6 +557,7 @@ export function SimpleResourcePage({
   const canWrite = useCanWrite()
 
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
   const [addModal, setAddModal] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -351,6 +567,11 @@ export function SimpleResourcePage({
   const [localSDCards,   setLocalSDCards]   = useState<(SDCard & { owner?: string })[]>([])
   const [localDrives,    setLocalDrives]    = useState<(HardDriveType & { owner?: string })[]>([])
   const [localEquipment, setLocalEquipment] = useState<Equipment[]>([])
+  // For the Team list: which shoots each member is currently on.
+  type MemberShoot = { id: string; name: string; date: string; venue: string; stage: string; status: string }
+  const [shootsByMember, setShootsByMember] = useState<Record<string, MemberShoot[]>>({})
+  // For the Equipment list: which shoot currently uses each equipment (by name).
+  const [shootByEquipment, setShootByEquipment] = useState<Record<string, string>>({})
 
   // Fetch data when the page mounts or kind changes
   useEffect(() => {
@@ -373,26 +594,90 @@ export function SimpleResourcePage({
       })
       .catch((err: any) => setError(err.message))
       .finally(() => setLoading(false))
+
+    // Team: derive which shoots each member is on, live from the shoots.
+    if (kind === 'team') {
+      shootsApi.list()
+        .then(shoots => {
+          const map: Record<string, MemberShoot[]> = {}
+          for (const sh of shoots) {
+            const ids = sh.crewIds?.length
+              ? sh.crewIds
+              : ((sh.stageFormData?.['Crew Assign']?.crewAssignments as { crewId: string }[] | undefined) ?? []).map(c => c.crewId)
+            const entry: MemberShoot = { id: sh.id, name: sh.name, date: sh.date, venue: sh.venue, stage: sh.currentStage, status: sh.status }
+            for (const id of ids) (map[id] ??= []).push(entry)
+          }
+          setShootsByMember(map)
+        })
+        .catch(() => setShootsByMember({}))
+    }
+
+    // Equipment: derive which shoot currently uses each equipment (by name),
+    // live from the shoots' Equipment Assign stage data. This is the source of
+    // truth — an item is "in use" only if it's actually in some shoot.
+    if (kind === 'equipment') {
+      shootsApi.list()
+        .then(shoots => {
+          const map: Record<string, string> = {}
+          for (const sh of shoots) {
+            const list = (sh.stageFormData?.['Equipment Assign']?.equipmentList as { equipment: string }[] | undefined) ?? []
+            for (const e of list) map[e.equipment] = sh.name
+          }
+          setShootByEquipment(map)
+        })
+        .catch(() => setShootByEquipment({}))
+    }
   }, [kind])
 
-  // Build display list
-  const data =
+  // Build a uniform row model for the table.
+  // code = short id/number, name, serial, category, status, holder (borrower/owner).
+  type Row = { id: string; code: string; name: string; serial: string; category: string; status: string; holder: string }
+  const rows: Row[] =
     kind === 'team'
-      ? localMembers.map(x => ({ id: x.id, name: x.name, meta: x.role, status: x.availability, extra: `${x.shoots} shoots` }))
+      ? localMembers.filter(x => x.name?.trim()).map(x => {
+          const n = shootsByMember[x.id]?.length ?? 0
+          // Status driven by actual shoot assignment: on a shoot = Assigned,
+          // otherwise Available (On Leave is preserved from the record).
+          const status = x.availability === 'On Leave' ? 'On Leave' : n > 0 ? 'Assigned' : 'Available'
+          return { id: x.id, code: '', name: x.name, serial: x.email, category: x.role, status, holder: `${n} shoot${n === 1 ? '' : 's'}` }
+        })
       : kind === 'sd'
-        ? localSDCards.map(x => ({ id: x.id, name: x.number, meta: x.capacity, status: x.status, extra: x.owner ? `Owner: ${x.owner}` : '' }))
+        ? localSDCards.map((x: any) => ({ id: x.id, code: x.number, name: `${x.brand} ${x.capacity}`, serial: x.serial || '', category: x.capacity, status: x.status, holder: x.status === 'Borrowed' ? (x.borrowedBy || '') : (x.owner || '') }))
         : kind === 'hard'
-          ? localDrives.map(x => ({ id: x.id, name: x.name, meta: `${x.brand} · ${x.capacity} TB`, status: x.status, extra: x.owner ? `Owner: ${x.owner}` : `${x.used} TB used` }))
-          : localEquipment.map(x => ({ id: x.id, name: x.name, meta: x.type, status: x.status, extra: `Owner: ${x.owner}` }))
+          ? localDrives.map((x: any) => ({ id: x.id, code: x.name, name: `${x.brand} · ${x.capacity} TB`, serial: x.serial || '', category: `${x.capacity} TB`, status: x.status, holder: x.owner || x.location || '' }))
+          : localEquipment.map((x: any) => {
+              const inShoot = shootByEquipment[x.name]
+              // Borrowed takes precedence; otherwise status is driven by actual
+              // shoot usage so removed items show Available again.
+              const status = x.status === 'Borrowed' ? 'Borrowed' : inShoot ? 'Assigned' : 'Available'
+              const holder = x.status === 'Borrowed'
+                ? (x.borrowedBy || '')
+                : inShoot ? `Shoot: ${inShoot}` : (x.owner || '')
+              return { id: x.id, code: x.id?.slice(0, 8) ?? '', name: x.name, serial: '', category: x.type, status, holder }
+            })
 
-  const filtered = data.filter(x =>
-    `${x.name} ${x.meta} ${x.extra}`.toLowerCase().includes(query.toLowerCase())
-  )
+  const filtered = rows.filter(r => {
+    const matchSearch = `${r.code} ${r.name} ${r.serial} ${r.category} ${r.holder}`.toLowerCase().includes(query.toLowerCase())
+    const matchStatus = !statusFilter || r.status === statusFilter
+    return matchSearch && matchStatus
+  })
+
+  // Summary counts for the stat cards (device kinds only).
+  const countBy = (pred: (r: Row) => boolean) => rows.filter(pred).length
+  const stats = [
+    { label: 'Available', icon: CheckCircle2, tone: '#2e9e5b', bg: '#e8f6ee', value: countBy(r => r.status === 'Available') },
+    { label: 'Borrowed',  icon: Package,      tone: '#2f6fb0', bg: '#e8f0fa', value: countBy(r => r.status === 'Borrowed') },
+    { label: 'Assigned',  icon: Clock,        tone: '#d98324', bg: '#fbefe0', value: countBy(r => r.status === 'Assigned' || r.status === 'In Use') },
+    { label: 'Retired',   icon: AlertCircle,  tone: '#c0392b', bg: '#fbe9e7', value: countBy(r => ['Retired','Damaged','Lost'].includes(r.status)) },
+  ]
+  const allStatuses = Array.from(new Set(rows.map(r => r.status)))
 
   const paths = { team: '/team', sd: '/sd-cards', hard: '/hard-drives', equipment: '/equipment' } as const
   const addLabel = kind === 'team' ? 'Member' : kind === 'sd' ? 'SD Card' : kind === 'hard' ? 'Hard Drive' : 'Equipment'
   // Team members: admin only. Other resources: any writer (admin/team). Viewers: none.
   const addDisabled = kind === 'team' ? !canAddMember : !canWrite
+
+  const kindLabel = kind === 'sd' ? 'SD card' : kind === 'hard' ? 'hard drive' : kind === 'equipment' ? 'equipment' : 'member'
 
   // Delete handlers — call API then remove from local state
   const handleDelete = async (id: string) => {
@@ -401,8 +686,45 @@ export function SimpleResourcePage({
       if (kind === 'sd')        { await sdCardsApi.remove(id);     setLocalSDCards(p  => p.filter(x => x.id !== id)) }
       if (kind === 'hard')      { await hardDrivesApi.remove(id);  setLocalDrives(p   => p.filter(x => x.id !== id)) }
       if (kind === 'equipment') { await equipmentApi.remove(id);   setLocalEquipment(p => p.filter(x => x.id !== id)) }
+      activityApi.log(`${kindLabel} deleted`).catch(() => {})
     } catch (err: any) {
       alert(`Delete failed: ${err.message}`)
+    }
+  }
+
+  // Edit (sd / hard / equipment). `editTarget` holds the raw record.
+  const [editTarget, setEditTarget] = useState<any | null>(null)
+
+  const findRaw = (id: string) =>
+    kind === 'sd'        ? localSDCards.find(x => x.id === id) :
+    kind === 'hard'      ? localDrives.find(x => x.id === id) :
+    kind === 'equipment' ? localEquipment.find(x => x.id === id) :
+                           undefined
+
+  const handleEditSave = async (id: string, patch: any) => {
+    let name = ''
+    if (kind === 'sd')        { const u: any = await sdCardsApi.update(id, patch);    name = u.number; setLocalSDCards(p  => p.map(x => x.id === id ? { ...x, ...u } : x)) }
+    if (kind === 'hard')      { const u: any = await hardDrivesApi.update(id, patch); name = u.name;   setLocalDrives(p   => p.map(x => x.id === id ? { ...x, ...u } : x)) }
+    if (kind === 'equipment') { const u: any = await equipmentApi.update(id, patch);  name = u.name;   setLocalEquipment(p => p.map(x => x.id === id ? { ...x, ...u } : x)) }
+    const action = patch.status === 'Borrowed' ? `${kindLabel} ${name} borrowed by ${patch.borrowedBy ?? ''}` : `${kindLabel} ${name} updated`
+    activityApi.log(action).catch(() => {})
+  }
+
+  // Borrow / Return (sd + equipment only)
+  const [borrowTarget, setBorrowTarget] = useState<any | null>(null)
+  // Team: member whose shoot list is shown in a popup.
+  const [memberShootsTarget, setMemberShootsTarget] = useState<{ name: string; shoots: MemberShoot[] } | null>(null)
+
+  const handleReturn = async (id: string) => {
+    // Clear borrow fields and set back to Available.
+    const patch: any = { status: 'Available', borrowedBy: '', pickupDate: '', returnDate: '', borrowNotes: '' }
+    try {
+      let name = ''
+      if (kind === 'sd')        { const u: any = await sdCardsApi.update(id, patch);   name = u.number; setLocalSDCards(p  => p.map(x => x.id === id ? { ...x, ...u } : x)) }
+      if (kind === 'equipment') { const u: any = await equipmentApi.update(id, patch); name = u.name;   setLocalEquipment(p => p.map(x => x.id === id ? { ...x, ...u } : x)) }
+      activityApi.log(`${kindLabel} ${name} returned`).catch(() => {})
+    } catch (err: any) {
+      alert(`Failed to return: ${err.message}`)
     }
   }
 
@@ -431,55 +753,109 @@ export function SimpleResourcePage({
         </div>
       )}
 
+      {/* Summary stat cards (device kinds only) */}
+      {kind !== 'team' && (
+        <div className="inv-stats">
+          {stats.map(s => (
+            <div className="inv-stat" key={s.label}>
+              <div className="inv-stat-icon" style={{ background: s.bg, color: s.tone }}>
+                <s.icon size={18} />
+              </div>
+              <div>
+                <span>{s.label}</span>
+                <strong>{s.value}</strong>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <section className="card">
         <div className="toolbar">
-          <SearchFilter value={query} onChange={setQuery} />
-          <button type="button" className="btn btn-secondary">
-            <ListFilter size={15} /> Filters
-          </button>
+          <SearchFilter value={query} onChange={setQuery} placeholder="Search by name, code, serial..." />
+          <select
+            className="select"
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            style={{ height: 44, fontSize: 12, borderRadius: 10 }}
+          >
+            <option value="">All Statuses</option>
+            {allStatuses.map(s => <option key={s}>{s}</option>)}
+          </select>
         </div>
 
         {loading && <Loader message={`Loading ${title.toLowerCase()}...`} />}
         {error   && <p style={{ padding: 16, color: 'red',  fontSize: 13 }}>{error}</p>}
 
         {!loading && !error && (
-          <div className="resource-grid">
-            {filtered.map(x => (
-              <div className="resource-card" key={x.id}>
-                <div className="resource-icon">
-                  {kind === 'team'      ? <Users size={17} />    :
-                   kind === 'sd'        ? <Database size={17} /> :
-                   kind === 'hard'      ? <HardDrive size={17}/> :
-                                          <Package size={17} />}
-                </div>
-                <div className="grow">
-                  <Link
-                    to={kind === 'hard' ? `/hard-drives/${x.id}` : paths[kind]}
-                    className="resource-name"
-                  >
-                    {x.name}
-                  </Link>
-                  <span>{x.meta}</span>
-                  {x.extra && <small>{x.extra}</small>}
-                </div>
-                <Badge tone={statusTone(x.status)}>{x.status}</Badge>
-                {isSuperAdmin && (
-                  <button
-                    type="button"
-                    className="icon-btn delete-btn"
-                    title={`Delete ${x.name}`}
-                    onClick={() => setDeleteTarget({ id: x.id, name: x.name })}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  {kind !== 'team' && <th>Code</th>}
+                  <th>Name</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Holder</th>
+                  {canWrite && <th className="inv-action-col">Action</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => (
+                  <tr key={r.id}>
+                    {kind !== 'team' && <td className="inv-code">{r.code || '—'}</td>}
+                    <td>
+                      {kind === 'team' ? (
+                        <button
+                          type="button"
+                          className="inv-name"
+                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
+                          onClick={() => setMemberShootsTarget({ name: r.name, shoots: shootsByMember[r.id] ?? [] })}
+                        >
+                          {r.name}
+                        </button>
+                      ) : (
+                        <Link to={kind === 'hard' ? `/hard-drives/${r.id}` : paths[kind]} className="inv-name">{r.name}</Link>
+                      )}
+                      {r.serial && <div className="inv-serial">SN: {r.serial}</div>}
+                    </td>
+                    <td>{r.category || '—'}</td>
+                    <td><Badge tone={statusTone(r.status)}>{r.status}</Badge></td>
+                    <td>{r.holder || '—'}</td>
+                    {canWrite && (
+                      <td className="inv-action-col">
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                          {(kind === 'sd' || kind === 'equipment') && (
+                            r.status === 'Borrowed' ? (
+                              <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => handleReturn(r.id)}>Return</button>
+                            ) : (
+                              <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setBorrowTarget(findRaw(r.id))}>Checkout</button>
+                            )
+                          )}
+                          {kind !== 'team' && (
+                            <button type="button" className="icon-btn" title={`Edit ${r.name}`} onClick={() => setEditTarget(findRaw(r.id))}>
+                              <Pencil size={14} />
+                            </button>
+                          )}
+                          {isSuperAdmin && (
+                            <button type="button" className="icon-btn delete-btn" title={`Delete ${r.name}`} onClick={() => setDeleteTarget({ id: r.id, name: r.name })}>
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={(kind === 'team' ? 4 : 5) + (canWrite ? 1 : 0)} style={{ padding: '32px 0', textAlign: 'center', color: '#938b87', fontSize: 12 }}>
+                      No {addLabel.toLowerCase()}s found.
+                    </td>
+                  </tr>
                 )}
-              </div>
-            ))}
-            {filtered.length === 0 && (
-              <div style={{ gridColumn: '1/-1', padding: '32px 0', textAlign: 'center', color: '#938b87', fontSize: 12 }}>
-                No {addLabel.toLowerCase()}s found.
-              </div>
-            )}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
@@ -489,10 +865,11 @@ export function SimpleResourcePage({
         <AddMemberModal
           open={addModal}
           onClose={() => setAddModal(false)}
-          existingEmails={localMembers.map(m => m.email)}
+          existingEmails={localMembers.map(m => m.email).filter(Boolean)}
           onAdd={async m => {
             const created = await crewApi.create(m)
             setLocalMembers(p => [created, ...p])
+            activityApi.log(`Team member ${created.name} added`).catch(() => {})
           }}
         />
       )}
@@ -503,6 +880,7 @@ export function SimpleResourcePage({
           onAdd={async c => {
             const created = await sdCardsApi.create(c)
             setLocalSDCards(p => [created, ...p])
+            activityApi.log(`SD card ${created.number} added`).catch(() => {})
           }}
         />
       )}
@@ -513,6 +891,7 @@ export function SimpleResourcePage({
           onAdd={async h => {
             const created = await hardDrivesApi.create(h)
             setLocalDrives(p => [created, ...p])
+            activityApi.log(`Hard drive ${created.name} added`).catch(() => {})
           }}
         />
       )}
@@ -523,6 +902,7 @@ export function SimpleResourcePage({
           onAdd={async e => {
             const created = await equipmentApi.create(e)
             setLocalEquipment(p => [created, ...p])
+            activityApi.log(`Equipment ${created.name} added`).catch(() => {})
           }}
         />
       )}
@@ -533,6 +913,54 @@ export function SimpleResourcePage({
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
       />
+
+      {kind !== 'team' && (
+        <EditResourceModal
+          kind={kind}
+          item={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSave={handleEditSave}
+        />
+      )}
+
+      {(kind === 'sd' || kind === 'equipment') && (
+        <BorrowModal
+          kind={kind}
+          item={borrowTarget}
+          onClose={() => setBorrowTarget(null)}
+          onBorrow={handleEditSave}
+        />
+      )}
+
+      {/* Team: popup listing the shoots a member is on */}
+      <Modal
+        open={!!memberShootsTarget}
+        title={memberShootsTarget ? `${memberShootsTarget.name} — Shoots` : 'Shoots'}
+        onClose={() => setMemberShootsTarget(null)}
+      >
+        {memberShootsTarget && memberShootsTarget.shoots.length === 0 ? (
+          <p style={{ fontSize: 13, color: '#938b87', margin: 0 }}>Not assigned to any shoot.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {memberShootsTarget?.shoots.map(sh => (
+              <Link
+                key={sh.id}
+                to={`/shoots/${sh.id}`}
+                onClick={() => setMemberShootsTarget(null)}
+                style={{ display: 'block', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', textDecoration: 'none', color: 'inherit' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <strong style={{ fontSize: 13, flex: 1 }}>{sh.name}</strong>
+                  <Badge tone={statusTone(sh.stage)}>{sh.stage}</Badge>
+                </div>
+                <div style={{ fontSize: 11, color: '#625b58', marginTop: 4 }}>
+                  {sh.date || '—'}{sh.venue ? ` · ${sh.venue}` : ''} · {sh.status}
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </Modal>
     </AppLayout>
   )
 }

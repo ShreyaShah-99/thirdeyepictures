@@ -1,25 +1,28 @@
 import {
-    Activity, Archive, Bell, CalendarDays, Camera, Check,
-    ClipboardList,
-    Clock3,
-    Crown,
-    Database,
-    FileText,
-    HardDrive, LayoutDashboard,
-    Lock,
-    LogOut,
-    MapPin,
-    Menu, Package,
-    Plus,
-    Save,
-    Search,
-    Shield,
-    Trash2,
-    UserRound,
-    Users, X
+  Activity, Archive, Bell, CalendarDays, Camera, Check,
+  ClipboardList,
+  Clock3,
+  Crown,
+  Database,
+  ExternalLink,
+  FileText,
+  HardDrive, LayoutDashboard,
+  Lock,
+  LogOut,
+  MapPin,
+  Menu, Package,
+  Pencil,
+  Plus,
+  Save,
+  Search,
+  Shield,
+  Trash2,
+  UserRound,
+  Users, X
 } from 'lucide-react'
-import React, { useState, type ReactNode } from 'react'
+import React, { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { activityApi, crewApi, equipmentApi, sdCardsApi, shootsApi, tasksApi } from './api'
 import logoImg from './assets/Images/ThirdEye_Logo.png'
 import { useAuth } from './auth'
 import { workflowStages } from './data'
@@ -32,12 +35,12 @@ export function Badge({ children, tone = 'neutral' }: { children: ReactNode; ton
   return <span className={`badge badge-${tone}`}>{children}</span>
 }
 
-export function statusTone(status: string) {
-  const s = status.toLowerCase()
+export function statusTone(status?: string) {
+  const s = (status ?? '').toLowerCase()
   if (s.includes('complete') || s === 'delivered' || s === 'available') return 'success' as const
   if (s.includes('pending') || s.includes('progress') || s === 'assigned' || s === 'in use' || s === 'wrapped') return 'warning' as const
   if (s.includes('lost') || s.includes('damaged') || s.includes('overdue')) return 'danger' as const
-  if (s === 'editing' || s === 'scheduled') return 'info' as const
+  if (s === 'editing' || s === 'scheduled' || s === 'borrowed') return 'info' as const
   return 'neutral' as const
 }
 
@@ -129,6 +132,20 @@ export function FormField({ label, children }: { label: string; children: ReactN
 }
 
 // ─── View-only field ──────────────────────────────────────────────────────────
+// Signature of a stage's saved data. Used in the StageForm `key` so the form
+// remounts (and re-reads its inputs) whenever the data changes. This must be
+// LOSSLESS: a length-based signature collides for same-length edits (e.g.
+// changing a note to a different value of equal length), which would leave the
+// form showing stale values after an edit.
+function dataVersion(data?: Record<string, unknown>): string {
+  if (!data) return 'none'
+  try {
+    return JSON.stringify(data)
+  } catch {
+    return 'x'
+  }
+}
+
 function ViewField({ label, value }: { label: string; value?: string | boolean | null }) {
   if (value === undefined || value === null || value === '') return null
   const display = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : value
@@ -140,35 +157,42 @@ function ViewField({ label, value }: { label: string; value?: string | boolean |
   )
 }
 
-// ─── Equipment list used in Crew Assign and Wrapped ──────────────────────────
-const EQUIPMENT_LIST = [
-  'Camera A7IV', '24-70mm Lens', '70-200mm Lens', 'Aputure 600D',
-  'Rode Wireless Mic', 'DJI RS3 Gimbal', 'Tripod', 'Slider', 'Drone'
-]
-
 // ─── Stage forms ─────────────────────────────────────────────────────────────
 
-function InquiryForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
+function InquiryForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const [form, setForm] = useState({
+    eventName: (existing?.eventName as string) ?? '',
     clientName: (existing?.clientName as string) ?? '',
     email: (existing?.email as string) ?? '',
     phone: (existing?.phone as string) ?? '',
     eventType: (existing?.eventType as string) ?? '',
     eventDate: (existing?.eventDate as string) ?? '',
+    eventTime: (existing?.eventTime as string) ?? '',
     message: (existing?.message as string) ?? '',
   })
+  const [error, setError] = useState('')
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
-  if (existing) {
+  const submit = () => {
+    // Shoot Name and Shoot Date are mandatory.
+    if (!form.eventName.trim()) { setError('Shoot Name is required.'); return }
+    if (!form.eventDate) { setError('Shoot Date is required.'); return }
+    setError('')
+    onSubmit({ ...form, eventName: form.eventName.trim() })
+  }
+
+  if (existing && !editing) {
     return (
       <div className="stage-form-view">
         <div className="form-grid">
+          <ViewField label="Shoot Name" value={existing.eventName as string} />
           <ViewField label="Client Name" value={existing.clientName as string} />
           <ViewField label="Email" value={existing.email as string} />
           <ViewField label="Phone" value={existing.phone as string} />
-          <ViewField label="Event Type" value={existing.eventType as string} />
-          <ViewField label="Event Date" value={existing.eventDate as string} />
+          <ViewField label="Shoot Type" value={existing.eventType as string} />
+          <ViewField label="Shoot Date" value={existing.eventDate as string} />
+          <ViewField label="Shoot Time" value={existing.eventTime as string} />
         </div>
         <ViewField label="Message" value={existing.message as string} />
       </div>
@@ -178,29 +202,43 @@ function InquiryForm({ existing, onSubmit }: { existing?: Record<string, unknown
   return (
     <div className="stage-form-input">
       <div className="form-grid">
+        <FormField label="Shoot Name *"><input value={form.eventName} onChange={set('eventName')} placeholder="e.g. Patel Wedding" /></FormField>
         <FormField label="Client Name"><input value={form.clientName} onChange={set('clientName')} placeholder="Full name" /></FormField>
         <FormField label="Email"><input type="email" value={form.email} onChange={set('email')} placeholder="email@example.com" /></FormField>
         <FormField label="Phone"><input value={form.phone} onChange={set('phone')} placeholder="+91 00000 00000" /></FormField>
-        <FormField label="Event Type">
+        <FormField label="Shoot Type">
           <select value={form.eventType} onChange={set('eventType')}>
             <option value="">Select type</option>
-            {['Wedding','Pre-Wedding','Couple','Corporate','Product','Fashion','Event','Commercial','Other'].map(x=><option key={x}>{x}</option>)}
+            <optgroup label="Events & Celebrations">
+              {['Wedding','Pre-Wedding','Engagement','Birthday','Anniversary','Babyshower','Housewarming','Office Inauguration','Farewell & Retirement Parties','Corporate Event','Cultural Event','Social Event','Collage Event','Product Launches & Openings','BNI Shoot','V2VBN Shoot'].map(x=><option key={x}>{x}</option>)}
+            </optgroup>
+            <optgroup label="Commercial Shoots">
+              {['Product Shoot','Brand Shoot','Podcast Shoot','Advertising Shoot','Car Delivery Shoot','Fashion Shoot','Jewellery Shoot','Industrial Shoot','Food / Restaurant Shoot','Podcast / Interview Shoot','Social Media Content Shoot','BTS Shoot','Travel Shoot'].map(x=><option key={x}>{x}</option>)}
+            </optgroup>
+            <optgroup label="Interior & Architecture">
+              {['Interior Shoot','Architecture Shoot','Real Estate Shoot','Hotel / Resort Shoot','Construction Progress Shoot'].map(x=><option key={x}>{x}</option>)}
+            </optgroup>
+            <optgroup label="Other">
+              <option>Other</option>
+            </optgroup>
           </select>
         </FormField>
-        <FormField label="Event Date"><input type="date" value={form.eventDate} onChange={set('eventDate')} /></FormField>
+        <FormField label="Shoot Date *"><input type="date" value={form.eventDate} onChange={set('eventDate')} /></FormField>
+        <FormField label="Shoot Time"><input type="time" value={form.eventTime} onChange={set('eventTime')} /></FormField>
       </div>
       <FormField label="Message"><textarea rows={3} value={form.message} onChange={set('message')} placeholder="Tell us about the event..." /></FormField>
+      {error && <p style={{ color: 'crimson', fontSize: 12, margin: '4px 0 0' }}>{error}</p>}
       <div className="modal-actions" style={{ marginTop: 8 }}>
-        <button type="button" className="btn btn-primary" onClick={() => onSubmit(form)}><Check size={14}/> Submit Inquiry</button>
+        <button type="button" className="btn btn-primary" onClick={submit}><Check size={14}/> Submit Inquiry</button>
       </div>
     </div>
   )
 }
 
-function ConfirmForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
+function ConfirmForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const [notes, setNotes] = useState((existing?.notes as string) ?? '')
 
-  if (existing) {
+  if (existing && !editing) {
     const confirmed = existing.confirmed as boolean | undefined
     const cancelled = existing.status === 'cancelled'
     return (
@@ -235,21 +273,31 @@ function ConfirmForm({ existing, onSubmit }: { existing?: Record<string, unknown
   )
 }
 
-function ScheduleForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
+function ScheduleForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const [form, setForm] = useState({
     shootDate: (existing?.shootDate as string) ?? '',
     startTime: (existing?.startTime as string) ?? '',
     endTime: (existing?.endTime as string) ?? '',
     venue: (existing?.venue as string) ?? '',
     city: (existing?.city as string) ?? '',
+    mapLink: (existing?.mapLink as string) ?? '',
     contactPersonName: (existing?.contactPersonName as string) ?? '',
     contactPersonPhone: (existing?.contactPersonPhone as string) ?? '',
     notes: (existing?.notes as string) ?? '',
   })
+  const [error, setError] = useState('')
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
-  if (existing) {
+  const submit = () => {
+    // Venue and Shoot Date are mandatory.
+    if (!form.venue.trim()) { setError('Venue is required.'); return }
+    if (!form.shootDate) { setError('Shoot Date is required.'); return }
+    setError('')
+    onSubmit({ ...form, venue: form.venue.trim() })
+  }
+
+  if (existing && !editing) {
     return (
       <div className="stage-form-view">
         <div className="form-grid three">
@@ -258,6 +306,16 @@ function ScheduleForm({ existing, onSubmit }: { existing?: Record<string, unknow
           <ViewField label="End Time" value={existing.endTime as string} />
           <ViewField label="Venue" value={existing.venue as string} />
           <ViewField label="City" value={existing.city as string} />
+          {existing.mapLink ? (
+            <div className="view-field">
+              <span>Google Maps</span>
+              <strong>
+                <a href={existing.mapLink as string} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  Open location <ExternalLink size={12} />
+                </a>
+              </strong>
+            </div>
+          ) : null}
           <ViewField label="Contact Person" value={existing.contactPersonName as string} />
           <ViewField label="Contact Phone" value={existing.contactPersonPhone as string} />
         </div>
@@ -269,26 +327,28 @@ function ScheduleForm({ existing, onSubmit }: { existing?: Record<string, unknow
   return (
     <div className="stage-form-input">
       <div className="form-grid three">
-        <FormField label="Shoot Date"><input type="date" value={form.shootDate} onChange={set('shootDate')} /></FormField>
+        <FormField label="Shoot Date *"><input type="date" value={form.shootDate} onChange={set('shootDate')} /></FormField>
         <FormField label="Start Time"><input type="time" value={form.startTime} onChange={set('startTime')} /></FormField>
         <FormField label="End Time"><input type="time" value={form.endTime} onChange={set('endTime')} /></FormField>
-        <FormField label="Venue"><input value={form.venue} onChange={set('venue')} placeholder="Venue name" /></FormField>
+        <FormField label="Venue *"><input value={form.venue} onChange={set('venue')} placeholder="Venue name" /></FormField>
         <FormField label="City"><input value={form.city} onChange={set('city')} placeholder="City" /></FormField>
+        <FormField label="Google Maps Link"><input type="url" value={form.mapLink} onChange={set('mapLink')} placeholder="https://maps.google.com/..." /></FormField>
         <FormField label="Contact Person Name"><input value={form.contactPersonName} onChange={set('contactPersonName')} placeholder="On-site contact name" /></FormField>
         <FormField label="Contact Person Phone"><input value={form.contactPersonPhone} onChange={set('contactPersonPhone')} placeholder="+91 00000 00000" /></FormField>
       </div>
       <FormField label="Notes"><textarea rows={3} value={form.notes} onChange={set('notes')} placeholder="Location details, parking, etc." /></FormField>
+      {error && <p style={{ color: 'crimson', fontSize: 12, margin: '4px 0 0' }}>{error}</p>}
       <div className="modal-actions" style={{ marginTop: 8 }}>
-        <button type="button" className="btn btn-primary" onClick={() => onSubmit(form)}><Check size={14}/> Save Schedule</button>
+        <button type="button" className="btn btn-primary" onClick={submit}><Check size={14}/> Save Schedule</button>
       </div>
     </div>
   )
 }
 
 // Crew Assign — crew selection with role dropdown per member
-function CrewAssignForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
-  const { members } = useResources()
-  const CREW_ROLES = ['Photographer','Videographer','Cinematographer','Lead Photographer','Assistant','Data Manager','Editor','Other']
+function CrewAssignForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
+  const { members, refresh } = useResources()
+  const CREW_ROLES = ['Photographer','Videographer','Candid Photographer','Traditional Photographer','Cinematographer','Traditional Videographer','Drone Operator','Assistant','Manager','Photographer + Coordinator','Videographer + Coordinator','Additional Photographer','Additional Videographer','Other']
 
   type CrewEntry = { crewId: string; role: string }
 
@@ -311,7 +371,49 @@ function CrewAssignForm({ existing, onSubmit }: { existing?: Record<string, unkn
     setCrewAssignments(prev => prev.map(e => e.crewId === crewId ? { ...e, role } : e))
   }
 
-  if (existing) {
+  // Save the stage AND update crew availability. Always force the currently
+  // selected members to 'Assigned' (idempotent). Any member who was in the
+  // previously-saved assignment but is no longer selected is reset to 'Available'.
+  const submitCrew = async () => {
+    // Only operate on ids that map to a REAL existing crew member. Updating an
+    // unknown id would make DynamoDB upsert a blank "ghost" member (no name).
+    const validId = (id: string | undefined): id is string => !!id && members.some(m => m.id === id)
+    const prevIds = ((existing?.crewAssignments as CrewEntry[] | undefined) ?? []).map(e => e.crewId).filter(validId)
+    const nowIds = crewAssignments.map(e => e.crewId).filter(validId)
+    const removed = prevIds.filter(id => !nowIds.includes(id))
+
+    // For removed members, only mark Available if they're on NO other shoot.
+    // Build the set of crew ids assigned on every OTHER shoot (this shoot uses
+    // the new selection, nowIds, since its save hasn't landed yet).
+    let stillAssignedElsewhere = new Set<string>()
+    if (removed.length > 0) {
+      try {
+        const allShoots = await shootsApi.list()
+        for (const sh of allShoots) {
+          if (shoot && sh.id === shoot.id) continue // skip current shoot
+          for (const cid of sh.crewIds ?? []) stillAssignedElsewhere.add(cid)
+        }
+      } catch (e) {
+        console.error('Failed to load shoots for availability check', e)
+        // On failure, be conservative and treat all removed as still assigned
+        // (don't wrongly free them). They can be freed manually if needed.
+        stillAssignedElsewhere = new Set(removed)
+      }
+    }
+    const toFree = removed.filter(id => !stillAssignedElsewhere.has(id))
+
+    await Promise.all([
+      // Set every selected member to Assigned (idempotent).
+      ...nowIds.map(id => crewApi.update(id, { availability: 'Assigned' }).catch((e: unknown) => console.error('crew assign failed', e))),
+      // Free only members no longer on this or any other shoot.
+      ...toFree.map(id => crewApi.update(id, { availability: 'Available' }).catch((e: unknown) => console.error('crew unassign failed', e))),
+    ])
+    onSubmit({ crewAssignments, notes })
+    activityApi.log(`${nowIds.length} crew member(s) assigned`).catch(() => {})
+    refresh()
+  }
+
+  if (existing && !editing) {
     const assignments = (existing.crewAssignments as CrewEntry[] | undefined) ?? []
     return (
       <div className="stage-form-view">
@@ -334,7 +436,7 @@ function CrewAssignForm({ existing, onSubmit }: { existing?: Record<string, unkn
       <div style={{ marginBottom: 12 }}>
         <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 8 }}>Select Crew Members</span>
         <div className="crew-check-list">
-          {members.filter(m => m.availability !== 'On Leave').map(m => {
+          {members.filter(m => m.availability !== 'On Leave' && m.name?.trim()).map(m => {
             const assigned = crewAssignments.find(e => e.crewId === m.id)
             return (
               <label key={m.id} className="crew-check-item" style={{ alignItems: 'center' }}>
@@ -360,16 +462,45 @@ function CrewAssignForm({ existing, onSubmit }: { existing?: Record<string, unkn
       </div>
       <FormField label="Notes"><textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Crew briefing notes..." /></FormField>
       <div className="modal-actions" style={{ marginTop: 8 }}>
-        <button type="button" className="btn btn-primary" onClick={() => onSubmit({ crewAssignments, notes })}><Check size={14}/> Assign Crew</button>
+        <button type="button" className="btn btn-primary" onClick={submitCrew}><Check size={14}/> Assign Crew</button>
       </div>
     </div>
   )
 }
 
 // Equipment Assign — its own pipeline stage
-function EquipmentAssignForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
-  const { members } = useResources()
+function EquipmentAssignForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
+  const { members, equipment, refresh } = useResources()
   type EquipmentEntry = { equipment: string; assignedTo: string }
+
+  // Equipment names assigned to OTHER shoots — those are busy and must not be
+  // selectable here (prevents double-booking the same gear across shoots).
+  const [busyElsewhere, setBusyElsewhere] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    let cancelled = false
+    shootsApi.list()
+      .then(shoots => {
+        const names = new Set<string>()
+        for (const sh of shoots) {
+          if (shoot && sh.id === shoot.id) continue // this shoot's own picks stay available
+          const list = (sh.stageFormData?.['Equipment Assign']?.equipmentList as EquipmentEntry[] | undefined) ?? []
+          for (const e of list) names.add(e.equipment)
+        }
+        if (!cancelled) setBusyElsewhere(names)
+      })
+      .catch(() => { if (!cancelled) setBusyElsewhere(new Set()) })
+    return () => { cancelled = true }
+  }, [shoot?.id])
+
+  // Equipment options come from the Equipment resource (added in the Equipment
+  // section), excluding any gear already assigned to another shoot.
+  const equipmentNames = equipment.map(e => e.name).filter(n => !busyElsewhere.has(n))
+
+  // Only crew assigned to THIS shoot (in the Crew Assign stage) can be chosen.
+  type CrewEntry = { crewId: string; role: string }
+  const assignedCrewIds = ((shoot?.stageFormData?.['Crew Assign']?.crewAssignments as CrewEntry[] | undefined) ?? [])
+    .map(c => c.crewId)
+  const assignableMembers = members.filter(m => assignedCrewIds.includes(m.id))
 
   const initList: EquipmentEntry[] = (existing?.equipmentList as EquipmentEntry[]) ?? []
   const [equipmentList, setEquipmentList] = useState<EquipmentEntry[]>(initList)
@@ -387,7 +518,41 @@ function EquipmentAssignForm({ existing, onSubmit }: { existing?: Record<string,
     setEquipmentList(prev => prev.map(e => e.equipment === eq ? { ...e, assignedTo } : e))
   }
 
-  if (existing) {
+  // Save the stage AND update equipment status in the Equipment table:
+  // selected items → 'Assigned' + record which shoot holds them; items removed
+  // from the previous assignment → back to 'Available' (freed).
+  const submitEquipment = async () => {
+    const prevNames = ((existing?.equipmentList as EquipmentEntry[] | undefined) ?? []).map(e => e.equipment)
+    const nowNames = equipmentList.map(e => e.equipment)
+    const removedNames = prevNames.filter(n => !nowNames.includes(n))
+
+    const assignOps = equipmentList.map(entry => {
+      const rec = equipment.find(e => e.name === entry.equipment)
+      if (!rec) return null
+      return equipmentApi.update(rec.id, {
+        status: 'Assigned',
+        currentShootId: shoot?.id,
+        currentShootName: shoot?.name,
+      } as any).catch((err: unknown) => console.error('Failed to set equipment Assigned:', err))
+    })
+
+    const freeOps = removedNames.map(name => {
+      const rec = equipment.find(e => e.name === name)
+      if (!rec) return null
+      return equipmentApi.update(rec.id, {
+        status: 'Available',
+        currentShootId: '',
+        currentShootName: '',
+      } as any).catch((err: unknown) => console.error('Failed to free equipment:', err))
+    })
+
+    await Promise.all([...assignOps, ...freeOps])
+    onSubmit({ equipmentList, notes })
+    activityApi.log(`${equipmentList.length} equipment item(s) assigned`).catch(() => {})
+    refresh()
+  }
+
+  if (existing && !editing) {
     const list = (existing.equipmentList as EquipmentEntry[] | undefined) ?? []
     return (
       <div className="stage-form-view">
@@ -416,7 +581,12 @@ function EquipmentAssignForm({ existing, onSubmit }: { existing?: Record<string,
           Select equipment and assign to a crew member
         </span>
         <div className="crew-check-list">
-          {EQUIPMENT_LIST.map(eq => {
+          {equipmentNames.length === 0 && (
+            <p style={{ fontSize: 12, color: '#938b87', padding: 8, margin: 0 }}>
+              No equipment added yet. Add equipment in the Equipment section first.
+            </p>
+          )}
+          {equipmentNames.map(eq => {
             const entry = equipmentList.find(e => e.equipment === eq)
             return (
               <label key={eq} className="crew-check-item" style={{ alignItems: 'center' }}>
@@ -429,8 +599,10 @@ function EquipmentAssignForm({ existing, onSubmit }: { existing?: Record<string,
                     onClick={e => e.stopPropagation()}
                     style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #d4cbc6', background: '#fff', cursor: 'pointer' }}
                   >
-                    <option value="">Assign to...</option>
-                    {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    <option value="">
+                      {assignableMembers.length ? 'Assign to...' : 'No crew assigned yet'}
+                    </option>
+                    {assignableMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                   </select>
                 )}
               </label>
@@ -442,7 +614,7 @@ function EquipmentAssignForm({ existing, onSubmit }: { existing?: Record<string,
         <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Equipment notes..." />
       </FormField>
       <div className="modal-actions" style={{ marginTop: 8 }}>
-        <button type="button" className="btn btn-primary" onClick={() => onSubmit({ equipmentList, notes })}>
+        <button type="button" className="btn btn-primary" onClick={submitEquipment}>
           <Check size={14}/> Assign Equipment
         </button>
       </div>
@@ -450,10 +622,10 @@ function EquipmentAssignForm({ existing, onSubmit }: { existing?: Record<string,
   )
 }
 
-function ShootDayNotesForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
+function ShootDayNotesForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const [notes, setNotes] = useState((existing?.notes as string) ?? '')
 
-  if (existing) {
+  if (existing && !editing) {
     return (
       <div className="stage-form-view">
         <ViewField label="Notes" value={existing.notes as string} />
@@ -471,8 +643,8 @@ function ShootDayNotesForm({ existing, onSubmit }: { existing?: Record<string, u
   )
 }
 
-function CardsAssignForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
-  const { members, sdCards } = useResources()
+function CardsAssignForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
+  const { members, sdCards, refresh } = useResources()
   type CardEntry = { cardId: string; assignedTo: string }
 
   const initCards: CardEntry[] = existing?.cardAssignments
@@ -494,7 +666,45 @@ function CardsAssignForm({ existing, onSubmit }: { existing?: Record<string, unk
     setCardAssignments(prev => prev.map(e => e.cardId === cardId ? { ...e, assignedTo } : e))
   }
 
-  if (existing) {
+  const ordinal = (n: number) => {
+    const s = ['th', 'st', 'nd', 'rd']
+    const v = n % 100
+    return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`
+  }
+
+  /**
+   * For a member with multiple cards, returns "1st card" / "2nd card" etc.
+   * Returns '' when the member has only one card (no label needed).
+   * Order follows the order cards were assigned in `list`.
+   */
+  const cardLabelFor = (list: CardEntry[], entry: CardEntry): string => {
+    if (!entry.assignedTo) return ''
+    const sameMember = list.filter(e => e.assignedTo === entry.assignedTo)
+    if (sameMember.length < 2) return ''
+    const idx = sameMember.findIndex(e => e.cardId === entry.cardId)
+    return `${ordinal(idx + 1)} card`
+  }
+
+  // Save the stage AND flip each selected card's status to 'Assigned' in the
+  // SD Cards table so the resource list reflects it. Don't touch Borrowed/Damaged
+  // etc. cards that aren't in this assignment.
+  const submitCards = async () => {
+    const assignedIds = new Set(cardAssignments.map(e => e.cardId))
+    await Promise.all(
+      [...assignedIds].map(id => {
+        const card = sdCards.find(c => c.id === id)
+        if (card && card.status !== 'Assigned') {
+          return sdCardsApi.update(id, { status: 'Assigned' }).catch((err: unknown) => console.error('Failed to set card Assigned:', err))
+        }
+        return null
+      })
+    )
+    onSubmit({ cardAssignments, notes })
+    activityApi.log(`${assignedIds.size} SD card(s) assigned`).catch(() => {})
+    refresh() // re-pull so the SD Cards list shows the new statuses
+  }
+
+  if (existing && !editing) {
     const assignments = (existing.cardAssignments as CardEntry[] | undefined) ?? []
     return (
       <div className="stage-form-view">
@@ -504,7 +714,13 @@ function CardsAssignForm({ existing, onSubmit }: { existing?: Record<string, unk
             {assignments.map(a => {
               const c = sdCards.find(x => x.id === a.cardId)
               const m = members.find(x => x.id === a.assignedTo)
-              return c ? <span key={a.cardId} className="crew-chip">{c.number} → {m ? m.name : 'Unassigned'}</span> : null
+              const label = cardLabelFor(assignments, a)
+              return c ? (
+                <span key={a.cardId} className="crew-chip">
+                  {c.number} → {m ? m.name : 'Unassigned'}
+                  {label ? ` (${label})` : ''}
+                </span>
+              ) : null
             })}
           </div>
         </div>
@@ -518,7 +734,12 @@ function CardsAssignForm({ existing, onSubmit }: { existing?: Record<string, unk
       <div style={{ marginBottom: 12 }}>
         <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 8 }}>Select SD Cards</span>
         <div className="crew-check-list">
-          {sdCards.filter(c => c.status === 'Available').map(c => {
+          {sdCards.length === 0 && (
+            <p style={{ fontSize: 12, color: '#938b87', padding: 8, margin: 0 }}>
+              No SD cards added yet. Add cards in the SD Cards section first.
+            </p>
+          )}
+          {sdCards.filter(c => !['Damaged', 'Lost', 'Retired'].includes(c.status)).map(c => {
             const entry = cardAssignments.find(e => e.cardId === c.id)
             return (
               <label key={c.id} className="crew-check-item" style={{ alignItems: 'center' }}>
@@ -527,17 +748,27 @@ function CardsAssignForm({ existing, onSubmit }: { existing?: Record<string, unk
                   <strong>{c.number} — {c.brand}</strong>
                   <small>{c.capacity}</small>
                 </div>
-                {entry && (
-                  <select
-                    value={entry.assignedTo}
-                    onChange={e => { e.stopPropagation(); setAssignee(c.id, e.target.value) }}
-                    onClick={e => e.stopPropagation()}
-                    style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #d4cbc6', background: '#fff', cursor: 'pointer' }}
-                  >
-                    <option value="">Assign to...</option>
-                    {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                  </select>
-                )}
+                {entry && (() => {
+                  const label = cardLabelFor(cardAssignments, entry)
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {label && (
+                        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--primary)', background: '#f0e6e3', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
+                          {label}
+                        </span>
+                      )}
+                      <select
+                        value={entry.assignedTo}
+                        onChange={e => { e.stopPropagation(); setAssignee(c.id, e.target.value) }}
+                        onClick={e => e.stopPropagation()}
+                        style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #d4cbc6', background: '#fff', cursor: 'pointer' }}
+                      >
+                        <option value="">Assign to...</option>
+                        {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
+                    </div>
+                  )
+                })()}
               </label>
             )
           })}
@@ -545,23 +776,33 @@ function CardsAssignForm({ existing, onSubmit }: { existing?: Record<string, unk
       </div>
       <FormField label="Notes"><textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Card allocation notes..." /></FormField>
       <div className="modal-actions" style={{ marginTop: 8 }}>
-        <button type="button" className="btn btn-primary" onClick={() => onSubmit({ cardAssignments, notes })}><Check size={14}/> Assign Cards</button>
+        <button type="button" className="btn btn-primary" onClick={submitCards}><Check size={14}/> Assign Cards</button>
       </div>
     </div>
   )
 }
 
-function WrappedForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
+function WrappedForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const initReturned: string[] = (existing?.equipmentReturned as string[]) ?? []
   const [packupTime, setPackupTime] = useState((existing?.packupTime as string) ?? '')
   const [notes, setNotes] = useState((existing?.notes as string) ?? '')
   const [equipmentReturned, setEquipmentReturned] = useState<string[]>(initReturned)
 
+  // Only equipment assigned to THIS shoot (in the Equipment Assign stage).
+  type EquipmentEntry = { equipment: string; assignedTo: string }
+  const shootEquipment = ((shoot?.stageFormData?.['Equipment Assign']?.equipmentList as EquipmentEntry[] | undefined) ?? [])
+    .map(e => e.equipment)
+
   const toggleReturned = (eq: string) => {
     setEquipmentReturned(prev => prev.includes(eq) ? prev.filter(x => x !== eq) : [...prev, eq])
   }
 
-  if (existing) {
+  const allSelected = shootEquipment.length > 0 && shootEquipment.every(eq => equipmentReturned.includes(eq))
+  const toggleAll = () => {
+    setEquipmentReturned(allSelected ? [] : [...shootEquipment])
+  }
+
+  if (existing && !editing) {
     return (
       <div className="stage-form-view">
         <div className="form-grid">
@@ -592,12 +833,24 @@ function WrappedForm({ existing, onSubmit }: { existing?: Record<string, unknown
       <div style={{ marginBottom: 12 }}>
         <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 8 }}>Equipment Checklist — Returned / Packed</span>
         <div className="crew-check-list">
-          {EQUIPMENT_LIST.map(eq => (
-            <label key={eq} className="crew-check-item">
-              <input type="checkbox" checked={equipmentReturned.includes(eq)} onChange={() => toggleReturned(eq)} />
-              <div><strong>{eq}</strong></div>
-            </label>
-          ))}
+          {shootEquipment.length === 0 ? (
+            <p style={{ fontSize: 12, color: '#938b87', padding: 8, margin: 0 }}>
+              No equipment assigned to this shoot. Assign equipment in the Equipment Assign stage first.
+            </p>
+          ) : (
+            <>
+              <label className="crew-check-item" style={{ fontWeight: 600 }}>
+                <input type="checkbox" checked={allSelected} onChange={toggleAll} />
+                <div><strong>Select All</strong></div>
+              </label>
+              {shootEquipment.map(eq => (
+                <label key={eq} className="crew-check-item">
+                  <input type="checkbox" checked={equipmentReturned.includes(eq)} onChange={() => toggleReturned(eq)} />
+                  <div><strong>{eq}</strong></div>
+                </label>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
@@ -608,7 +861,7 @@ function WrappedForm({ existing, onSubmit }: { existing?: Record<string, unknown
   )
 }
 
-function DataCopyForm({ existing, shoot, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; onSubmit: (d: Record<string, unknown>) => void }) {
+function DataCopyForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const { members, sdCards, hardDrives } = useResources()
   type CardCopyEntry = { cardId: string; assignedTo: string; status: string }
 
@@ -640,7 +893,25 @@ function DataCopyForm({ existing, shoot, onSubmit }: { existing?: Record<string,
     setCardCopyStatus(prev => prev.map(e => e.cardId === cardId ? { ...e, status } : e))
   }
 
-  if (existing) {
+  const ordinal = (n: number) => {
+    const s = ['th', 'st', 'nd', 'rd']
+    const v = n % 100
+    return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`
+  }
+
+  /**
+   * "1st card" / "2nd card" when a member has multiple cards in this list,
+   * '' when they only have one. Order follows the list order.
+   */
+  const cardLabelFor = (list: CardCopyEntry[], entry: CardCopyEntry): string => {
+    if (!entry.assignedTo) return ''
+    const sameMember = list.filter(e => e.assignedTo === entry.assignedTo)
+    if (sameMember.length < 2) return ''
+    const idx = sameMember.findIndex(e => e.cardId === entry.cardId)
+    return `${ordinal(idx + 1)} card`
+  }
+
+  if (existing && !editing) {
     const drive = hardDrives.find(h => h.id === existing.driveId)
     const statuses = (existing.cardCopyStatus as CardCopyEntry[]) ?? []
     return (
@@ -655,10 +926,11 @@ function DataCopyForm({ existing, shoot, onSubmit }: { existing?: Record<string,
             {statuses.map(e => {
               const c = sdCards.find(x => x.id === e.cardId)
               const m = members.find(x => x.id === e.assignedTo)
+              const label = cardLabelFor(statuses, e)
               return c ? (
                 <div key={e.cardId} className="data-copy-card-row">
                   {m
-                    ? <span className="data-copy-member">{m.name}</span>
+                    ? <span className="data-copy-member">{m.name}{label ? ` · ${label}` : ''}</span>
                     : <span className="data-copy-member" style={{ color: '#aaa' }}>Unassigned</span>
                   }
                   <span className="data-copy-card">{c.number} <small>{c.capacity}</small></span>
@@ -679,8 +951,8 @@ function DataCopyForm({ existing, shoot, onSubmit }: { existing?: Record<string,
       <div className="form-grid">
         <FormField label="Destination Drive">
           <select value={driveId} onChange={e => setDriveId(e.target.value)}>
-            <option value="">Select drive</option>
-            {hardDrives.filter(h => h.status !== 'Full' && h.status !== 'Damaged').map(h =>
+            <option value="">{hardDrives.length ? 'Select drive' : 'No hard drives added yet'}</option>
+            {hardDrives.filter(h => !['Damaged', 'Lost', 'Retired'].includes(h.status)).map(h =>
               <option key={h.id} value={h.id}>{h.name} — {h.brand} · {h.capacity - h.used} TB free</option>
             )}
           </select>
@@ -697,10 +969,11 @@ function DataCopyForm({ existing, shoot, onSubmit }: { existing?: Record<string,
           {cardCopyStatus.map(e => {
             const c = sdCards.find(x => x.id === e.cardId)
             const m = members.find(x => x.id === e.assignedTo)
+            const label = cardLabelFor(cardCopyStatus, e)
             return c ? (
               <div key={e.cardId} className="data-copy-card-row">
                 {m
-                  ? <span className="data-copy-member">{m.name}</span>
+                  ? <span className="data-copy-member">{m.name}{label ? ` · ${label}` : ''}</span>
                   : <span className="data-copy-member" style={{ color: '#aaa' }}>Unassigned</span>
                 }
                 <span className="data-copy-card">{c.number} <small>{c.capacity}</small></span>
@@ -730,7 +1003,7 @@ function DataCopyForm({ existing, shoot, onSubmit }: { existing?: Record<string,
   )
 }
 
-function SortingStageForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
+function SortingStageForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const { members, hardDrives } = useResources()
   type FileTypeRow = {
     type: 'JPG' | 'RAW' | 'Videos'
@@ -753,7 +1026,7 @@ function SortingStageForm({ existing, onSubmit }: { existing?: Record<string, un
   const updateRow = (type: string, key: keyof FileTypeRow, value: string | boolean) =>
     setRows(prev => prev.map(r => r.type === type ? { ...r, [key]: value } : r))
 
-  if (existing) {
+  if (existing && !editing) {
     const fileRows = (existing.fileTypeRows as FileTypeRow[]) ?? []
     return (
       <div className="stage-form-view">
@@ -831,7 +1104,7 @@ function SortingStageForm({ existing, onSubmit }: { existing?: Record<string, un
                 className="sorting-drive-select"
               >
                 <option value="">To drive</option>
-                {hardDrives.filter(h => h.id !== r.sourceDriveId).map(h =>
+                {hardDrives.map(h =>
                   <option key={h.id} value={h.id}>{h.name}</option>
                 )}
               </select>
@@ -862,24 +1135,92 @@ function SortingStageForm({ existing, onSubmit }: { existing?: Record<string, un
   )
 }
 
-function EditingStageForm({ existing, onSubmit }: { existing?: Record<string, unknown>; onSubmit: (d: Record<string, unknown>) => void }) {
+function EditingStageForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const { members } = useResources()
-  type EditTask = { id: string; assignedTo: string; editType: string; notes: string }
+  // `taskId` links this editing task to a row in the global Tasks table, so we
+  // don't create a duplicate on re-save.
+  type EditTask = { id: string; assignedTo: string; editType: string; notes: string; taskId?: string }
 
   const initTasks: EditTask[] = (existing?.editingTasks as EditTask[]) ?? []
 
   const [tasks, setTasks] = useState<EditTask[]>(initTasks)
   const [newTask, setNewTask] = useState<Omit<EditTask, 'id'>>({ assignedTo: '', editType: '', notes: '' })
+  const [addError, setAddError] = useState('')
+  const [saving, setSaving] = useState(false)
+  // Which existing task is being edited inline, and its working draft.
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+  const [draft, setDraft] = useState<Omit<EditTask, 'id'>>({ assignedTo: '', editType: '', notes: '' })
+
+  const EDIT_TYPES = ['Cinematic Highlight','Cinematic Film','Reel Vertical','Reel Horizontal','Traditional Video','Cinematic Teaser','Social Media Content','Commercial / Brand Film Editing','Motion Graphics Edit','Podcast Editing','Other / Custom Requirement','Photo Selection','Photo Editing','Album Designer','Other']
 
   const addTask = () => {
-    if (!newTask.assignedTo || !newTask.editType) return
+    if (!newTask.assignedTo || !newTask.editType) {
+      setAddError('Select a member and an edit type before adding.')
+      return
+    }
+    setAddError('')
     setTasks(prev => [...prev, { id: `et-${Date.now()}`, ...newTask }])
     setNewTask({ assignedTo: '', editType: '', notes: '' })
   }
 
-  const removeTask = (id: string) => setTasks(prev => prev.filter(t => t.id !== id))
+  // Delete a task. If it was pushed to the global Tasks table, remove it there too.
+  const removeTask = (t: EditTask) => {
+    setTasks(prev => prev.filter(x => x.id !== t.id))
+    if (editingTaskId === t.id) setEditingTaskId(null)
+    if (t.taskId) tasksApi.remove(t.taskId).catch(err => console.error('Failed to delete linked task:', err))
+  }
 
-  if (existing && (existing.editingTasks as EditTask[] | undefined)?.length) {
+  const startEdit = (t: EditTask) => {
+    setEditingTaskId(t.id)
+    setDraft({ assignedTo: t.assignedTo, editType: t.editType, notes: t.notes })
+  }
+
+  const cancelEdit = () => setEditingTaskId(null)
+
+  const saveEdit = (id: string) => {
+    if (!draft.assignedTo || !draft.editType) return
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...draft } : t))
+    setEditingTaskId(null)
+  }
+
+  // Save the stage AND push each new editing task into the global Tasks list so
+  // it shows up on the Tasks page. Tasks already pushed (have a taskId) are skipped.
+  const saveTasks = async () => {
+    setSaving(true)
+    try {
+      const withTaskIds = await Promise.all(
+        tasks.map(async t => {
+          const payload = {
+            title: `${t.editType}${shoot ? ` — ${shoot.name}` : ''}`,
+            description: t.notes,
+            assignedTo: t.assignedTo,
+          }
+          if (t.taskId) {
+            // Already in the Tasks table — push any edits to it.
+            try {
+              await tasksApi.update(t.taskId, payload)
+            } catch (err) {
+              console.error('Failed to update linked task:', err)
+            }
+            return t
+          }
+          try {
+            const created = await tasksApi.create({ ...payload, type: 'Editing', priority: 'Normal', status: 'Pending' })
+            return { ...t, taskId: created.id }
+          } catch (err) {
+            console.error('Failed to create task for editing entry:', err)
+            return t // keep the editing task even if the global task creation fails
+          }
+        })
+      )
+      setTasks(withTaskIds)
+      onSubmit({ editingTasks: withTaskIds })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (existing && !editing && (existing.editingTasks as EditTask[] | undefined)?.length) {
     const taskList = existing.editingTasks as EditTask[]
     return (
       <div className="stage-form-view">
@@ -905,16 +1246,47 @@ function EditingStageForm({ existing, onSubmit }: { existing?: Record<string, un
           <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 6 }}>Editing Tasks</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {tasks.map(t => (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f9f6f4', borderRadius: 6, padding: '6px 10px', border: '1px solid #e8e0db' }}>
-                <div style={{ flex: 1 }}>
-                  <strong style={{ fontSize: 12 }}>{t.assignedTo}</strong>
-                  <span style={{ fontSize: 11, color: '#888', marginLeft: 8 }}>{t.editType}</span>
-                  {t.notes && <div style={{ fontSize: 11, color: '#666' }}>{t.notes}</div>}
+              editingTaskId === t.id ? (
+                /* Inline edit mode for this task */
+                <div key={t.id} style={{ background: '#fff', borderRadius: 6, padding: 10, border: '1px solid #d4cbc6' }}>
+                  <div className="form-grid">
+                    <FormField label="Assign To">
+                      <select value={draft.assignedTo} onChange={e => setDraft(d => ({ ...d, assignedTo: e.target.value }))}>
+                        <option value="">Select member</option>
+                        {members.map(m => <option key={m.id} value={m.name}>{m.name} — {m.role}</option>)}
+                      </select>
+                    </FormField>
+                    <FormField label="Edit Type">
+                      <select value={draft.editType} onChange={e => setDraft(d => ({ ...d, editType: e.target.value }))}>
+                        <option value="">Select type</option>
+                        {EDIT_TYPES.map(x => <option key={x}>{x}</option>)}
+                      </select>
+                    </FormField>
+                  </div>
+                  <FormField label="Notes">
+                    <textarea rows={2} value={draft.notes} onChange={e => setDraft(d => ({ ...d, notes: e.target.value }))} placeholder="Task notes..." />
+                  </FormField>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => saveEdit(t.id)}><Check size={13} /> Save</button>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={cancelEdit}><X size={13} /> Cancel</button>
+                  </div>
                 </div>
-                <button type="button" className="icon-btn" onClick={() => removeTask(t.id)} style={{ color: '#c0392b' }}>
-                  <Trash2 size={13} />
-                </button>
-              </div>
+              ) : (
+                /* Read row with Edit + Delete */
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f9f6f4', borderRadius: 6, padding: '6px 10px', border: '1px solid #e8e0db' }}>
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ fontSize: 12 }}>{t.assignedTo}</strong>
+                    <span style={{ fontSize: 11, color: '#888', marginLeft: 8 }}>{t.editType}</span>
+                    {t.notes && <div style={{ fontSize: 11, color: '#666' }}>{t.notes}</div>}
+                  </div>
+                  <button type="button" className="icon-btn" onClick={() => startEdit(t)} title="Edit task" style={{ color: '#625b58' }}>
+                    <Pencil size={13} />
+                  </button>
+                  <button type="button" className="icon-btn" onClick={() => removeTask(t)} title="Delete task" style={{ color: '#c0392b' }}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              )
             ))}
           </div>
         </div>
@@ -933,26 +1305,27 @@ function EditingStageForm({ existing, onSubmit }: { existing?: Record<string, un
           <FormField label="Edit Type">
             <select value={newTask.editType} onChange={e => setNewTask(f => ({ ...f, editType: e.target.value }))}>
               <option value="">Select type</option>
-              {['Wedding Highlights','Full Album','Teaser Video','Short Reel','Product Catalogue','Corporate Film','Other'].map(x => <option key={x}>{x}</option>)}
+              {['Cinematic Highlight','Cinematic Film','Reel Vertical','Reel Horizontal','Traditional Video','Cinematic Teaser','Social Media Content','Commercial / Brand Film Editing','Motion Graphics Edit','Podcast Editing','Other / Custom Requirement','Photo Selection','Photo Editing','Album Designer','Other'].map(x => <option key={x}>{x}</option>)}
             </select>
           </FormField>
         </div>
         <FormField label="Notes">
           <textarea rows={2} value={newTask.notes} onChange={e => setNewTask(f => ({ ...f, notes: e.target.value }))} placeholder="Task notes..." />
         </FormField>
+        {addError && <p style={{ color: 'crimson', fontSize: 11, margin: '2px 0 6px' }}>{addError}</p>}
         <button type="button" className="btn btn-secondary" onClick={addTask} style={{ marginTop: 4 }}>
           <Plus size={13} /> Add Editing Task
         </button>
       </div>
 
       <div className="modal-actions" style={{ marginTop: 8 }}>
-        <button type="button" className="btn btn-primary" onClick={() => onSubmit({ editingTasks: tasks })}><Check size={14}/> Save Editing Tasks</button>
+        <button type="button" className="btn btn-primary" onClick={saveTasks} disabled={saving}><Check size={14}/> {saving ? 'Saving...' : 'Save Editing Tasks'}</button>
       </div>
     </div>
   )
 }
 
-function DeliveredStageForm({ existing, shoot, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; onSubmit: (d: Record<string, unknown>) => void }) {
+function DeliveredStageForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const { members } = useResources()
   type EditTask = { id: string; assignedTo: string; editType: string; notes: string }
   const editingTasks: EditTask[] = (shoot?.stageFormData?.['Editing']?.editingTasks as EditTask[]) ?? []
@@ -966,7 +1339,7 @@ function DeliveredStageForm({ existing, shoot, onSubmit }: { existing?: Record<s
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
-  if (existing) {
+  if (existing && !editing) {
     return (
       <div className="stage-form-view">
         {editingTasks.length > 0 && (
@@ -1034,25 +1407,26 @@ function DeliveredStageForm({ existing, shoot, onSubmit }: { existing?: Record<s
 }
 
 // Map each stage to its form component
-function StageForm({ stage, existing, shoot, onSubmit }: {
+function StageForm({ stage, existing, shoot, editing = false, onSubmit }: {
   stage: WorkflowStage
   existing?: Record<string, unknown>
   shoot?: Shoot
+  editing?: boolean
   onSubmit: (d: Record<string, unknown>) => void
 }) {
   switch (stage) {
-    case 'Inquiry':         return <InquiryForm existing={existing} onSubmit={onSubmit} />
-    case 'Confirm':         return <ConfirmForm existing={existing} onSubmit={onSubmit} />
-    case 'Schedule':        return <ScheduleForm existing={existing} onSubmit={onSubmit} />
-    case 'Crew Assign':     return <CrewAssignForm existing={existing} onSubmit={onSubmit} />
-    case 'Equipment Assign': return <EquipmentAssignForm existing={existing} onSubmit={onSubmit} />
-    case 'Shoot Day Notes': return <ShootDayNotesForm existing={existing} onSubmit={onSubmit} />
-    case 'Cards Assign':    return <CardsAssignForm existing={existing} onSubmit={onSubmit} />
-    case 'Wrapped':         return <WrappedForm existing={existing} onSubmit={onSubmit} />
-    case 'Data Copy':       return <DataCopyForm existing={existing} shoot={shoot} onSubmit={onSubmit} />
-    case 'Sorting':         return <SortingStageForm existing={existing} onSubmit={onSubmit} />
-    case 'Editing':         return <EditingStageForm existing={existing} onSubmit={onSubmit} />
-    case 'Delivered':       return <DeliveredStageForm existing={existing} shoot={shoot} onSubmit={onSubmit} />
+    case 'Inquiry':         return <InquiryForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Confirm':         return <ConfirmForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Schedule':        return <ScheduleForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Crew Assign':     return <CrewAssignForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
+    case 'Equipment Assign': return <EquipmentAssignForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
+    case 'Shoot Day Notes': return <ShootDayNotesForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Cards Assign':    return <CardsAssignForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Wrapped':         return <WrappedForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
+    case 'Data Copy':       return <DataCopyForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
+    case 'Sorting':         return <SortingStageForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Editing':         return <EditingStageForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
+    case 'Delivered':       return <DeliveredStageForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     default:                return null
   }
 }
@@ -1066,18 +1440,37 @@ export function WorkflowTimeline({ shoot, onStage, onStageFormSubmit, readOnly =
   readOnly?: boolean
 }) {
   const [selected, setSelected] = useState<WorkflowStage | null>(null)
+  // Which submitted stage is currently being edited (prefilled, editable form).
+  const [editingStage, setEditingStage] = useState<WorkflowStage | null>(null)
 
   const handleClick = (stage: WorkflowStage) => {
     const item = shoot.workflow[stage]
     // Locked stages can't be opened
     if (item.status === 'locked') return
     setSelected(prev => prev === stage ? null : stage)
+    setEditingStage(null) // leave edit mode when switching stages
     onStage(stage)
   }
 
   const handleSubmit = (stage: WorkflowStage, data: Record<string, unknown>) => {
+    // Was this an edit of an already-submitted stage, or a fresh submission?
+    const wasEdit = editingStage === stage || !!shoot.stageFormData?.[stage]
     onStageFormSubmit?.(stage, data)
-    // Keep open to show view mode
+    setEditingStage(null)
+
+    if (wasEdit) {
+      // Editing: stay on this stage and show the updated details.
+      return
+    }
+
+    // Fresh submission: jump straight to the next stage's form so the user can
+    // keep going without clicking. Stop at the last stage.
+    const idx = workflowStages.indexOf(stage)
+    const next = workflowStages[idx + 1]
+    if (next) {
+      setSelected(next)
+      onStage(next)
+    }
   }
 
   // Determine which stages are "highlighted" = completed or current
@@ -1123,13 +1516,18 @@ export function WorkflowTimeline({ shoot, onStage, onStageFormSubmit, readOnly =
         </div>
       </div>
 
-      {selected && shoot.workflow[selected].status !== 'locked' && (
+      {selected && shoot.workflow[selected].status !== 'locked' && (() => {
+        const hasData = !!shoot.stageFormData?.[selected]
+        const isEditing = editingStage === selected
+        return (
         <div className="stage-form-panel">
           <div className="stage-form-header">
             <div>
               <span className="eyebrow">{selected}</span>
               <h4>
-                {shoot.stageFormData?.[selected]
+                {isEditing
+                  ? 'Edit stage details'
+                  : hasData
                   ? 'Stage details (submitted)'
                   : shoot.workflow[selected].status === 'completed'
                   ? 'Stage completed — view details'
@@ -1137,24 +1535,44 @@ export function WorkflowTimeline({ shoot, onStage, onStageFormSubmit, readOnly =
                 }
               </h4>
             </div>
-            {shoot.stageFormData?.[selected] && (
-              <span className="submitted-badge"><Check size={11}/> Submitted</span>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {hasData && !isEditing && (
+                <span className="submitted-badge"><Check size={11}/> Submitted</span>
+              )}
+              {/* Allow editing a submitted stage (unless read-only). */}
+              {hasData && !readOnly && onStageFormSubmit && (
+                isEditing ? (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditingStage(null)}>
+                    <X size={13}/> Cancel
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditingStage(selected)}>
+                    <Pencil size={13}/> Edit
+                  </button>
+                )
+              )}
+            </div>
           </div>
-          {readOnly && !shoot.stageFormData?.[selected] ? (
+          {readOnly && !hasData ? (
             <p style={{ fontSize: 12, color: '#938b87', margin: 0 }}>
               You have read-only access. An admin needs to add you to a team before you can edit stages.
             </p>
           ) : (
             <StageForm
+              // Remount the form whenever the stage, edit-mode, or saved data
+              // changes so each field's local state is re-seeded from `existing`.
+              // Without this React reuses the instance and shows stale values.
+              key={`${selected}-${isEditing ? 'edit' : 'view'}-${shoot.updatedAt ?? ''}-${dataVersion(shoot.stageFormData?.[selected])}`}
               stage={selected}
               existing={shoot.stageFormData?.[selected]}
               shoot={shoot}
+              editing={isEditing}
               onSubmit={(data) => handleSubmit(selected, data)}
             />
           )}
         </div>
-      )}
+        )
+      })()}
     </section>
   )
 }
