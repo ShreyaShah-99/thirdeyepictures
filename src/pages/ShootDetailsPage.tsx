@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { shootsApi } from '../api'
 import { useAuth, useCanWrite } from '../auth'
+import { downloadShootIcs, googleCalendarUrl } from '../calendar'
 import { AppLayout, Badge, Modal, WorkflowTimeline, statusTone } from '../components'
 import { workflowStages } from '../data'
 import { PageLoader } from '../Spinner'
@@ -136,6 +137,9 @@ export function ShootDetails() {
     }
   }
 
+  // Google Calendar "add event" link for this shoot (null if no usable date).
+  const gcalUrl = googleCalendarUrl(shoot)
+
   // Data copy is "pending" when the shoot has progressed to/past Data Copy but
   // the Data Copy stage isn't completed, or any card in it is still 'Pending'.
   const dataCopyPending = (() => {
@@ -186,6 +190,30 @@ export function ShootDetails() {
           </button>
         )}
       </div>
+
+      {/* Add-to-calendar actions (uses the scheduled date/time + venue). */}
+      {gcalUrl && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          <a
+            className="btn btn-secondary"
+            href={gcalUrl}
+            target="_blank"
+            rel="noreferrer"
+            title="Add this shoot to your Google Calendar"
+          >
+            <CalendarDays size={15} /> Add to Google Calendar
+          </a>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => downloadShootIcs(shoot)}
+            title="Download a calendar (.ics) file for this shoot"
+          >
+            <CalendarDays size={15} /> Download .ics
+          </button>
+        </div>
+      )}
+
       <WorkflowTimeline
         shoot={shoot}
         onStage={selectStage}
