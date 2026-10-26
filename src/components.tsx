@@ -39,8 +39,8 @@ export function statusTone(status?: string) {
   const s = (status ?? '').toLowerCase()
   if (s.includes('complete') || s === 'delivered' || s === 'available') return 'success' as const
   if (s.includes('pending') || s.includes('progress') || s === 'assigned' || s === 'in use' || s === 'wrapped') return 'warning' as const
-  if (s.includes('lost') || s.includes('damaged') || s.includes('overdue')) return 'danger' as const
-  if (s === 'editing' || s === 'scheduled' || s === 'borrowed') return 'info' as const
+  if (s.includes('lost') || s.includes('damaged') || s.includes('overdue') || s === 'borrowed') return 'danger' as const
+  if (s === 'editing' || s === 'scheduled') return 'info' as const
   return 'neutral' as const
 }
 
@@ -158,6 +158,46 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return <div className="page-header"><div><h1>{title}</h1>{subtitle && <p>{subtitle}</p>}</div>{action}</div>
+}
+
+/**
+ * Client-side pagination. Slices `items` into pages of `pageSize` (default 10)
+ * and keeps the current page valid as the list changes (e.g. after filtering).
+ */
+export function usePagination<T>(items: T[], pageSize = 10) {
+  const [page, setPage] = useState(1)
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize))
+
+  // Clamp the page if the list shrank (filtering/deleting) below the current page.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
+
+  const start = (page - 1) * pageSize
+  const pageItems = items.slice(start, start + pageSize)
+  return { page, setPage, totalPages, pageItems, total: items.length, pageSize }
+}
+
+/**
+ * Pagination controls. Hidden when there's only one page. Shows Prev/Next and a
+ * "X–Y of N" range.
+ */
+export function Pagination({ page, totalPages, total, pageSize, onPage }: {
+  page: number; totalPages: number; total: number; pageSize: number; onPage: (p: number) => void
+}) {
+  if (totalPages <= 1) return null
+  const from = (page - 1) * pageSize + 1
+  const to = Math.min(page * pageSize, total)
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 14px', borderTop: '1px solid var(--border)' }}>
+      <span style={{ fontSize: 12, color: '#938b87' }}>{from}–{to} of {total}</span>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button type="button" className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} disabled={page <= 1} onClick={() => onPage(page - 1)}>Prev</button>
+        <span style={{ fontSize: 12, color: '#625b58', alignSelf: 'center', minWidth: 60, textAlign: 'center' }}>Page {page}/{totalPages}</span>
+        <button type="button" className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} disabled={page >= totalPages} onClick={() => onPage(page + 1)}>Next</button>
+      </div>
+    </div>
+  )
 }
 
 export function FormField({ label, children }: { label: string; children: ReactNode }) {
@@ -554,6 +594,7 @@ function EquipmentAssignForm({ existing, shoot, editing, onSubmit }: { existing?
   const initList: EquipmentEntry[] = (existing?.equipmentList as EquipmentEntry[]) ?? []
   const [equipmentList, setEquipmentList] = useState<EquipmentEntry[]>(initList)
   const [notes, setNotes] = useState((existing?.notes as string) ?? '')
+  const [error, setError] = useState('')
 
   const toggle = (eq: string) => {
     setEquipmentList(prev => {
@@ -571,6 +612,14 @@ function EquipmentAssignForm({ existing, shoot, editing, onSubmit }: { existing?
   // selected items → 'Assigned' + record which shoot holds them; items removed
   // from the previous assignment → back to 'Available' (freed).
   const submitEquipment = async () => {
+    // Every selected equipment item must be assigned to a crew member.
+    const unassigned = equipmentList.filter(e => !e.assignedTo)
+    if (unassigned.length > 0) {
+      setError(`Assign a crew member to every selected item before continuing: ${unassigned.map(e => e.equipment).join(', ')}`)
+      return
+    }
+    setError('')
+
     const prevNames = ((existing?.equipmentList as EquipmentEntry[] | undefined) ?? []).map(e => e.equipment)
     const nowNames = equipmentList.map(e => e.equipment)
     const removedNames = prevNames.filter(n => !nowNames.includes(n))
@@ -666,6 +715,7 @@ function EquipmentAssignForm({ existing, shoot, editing, onSubmit }: { existing?
       <FormField label="Notes">
         <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Equipment notes..." />
       </FormField>
+      {error && <p style={{ color: 'crimson', fontSize: 12, margin: '4px 0 0' }}>{error}</p>}
       <div className="modal-actions" style={{ marginTop: 8 }}>
         <button type="button" className="btn btn-primary" onClick={submitEquipment}>
           <Check size={14}/> Assign Equipment
@@ -713,6 +763,7 @@ function CardsAssignForm({ existing, shoot, editing, onSubmit }: { existing?: Re
 
   const [cardAssignments, setCardAssignments] = useState<CardEntry[]>(initCards)
   const [notes, setNotes] = useState((existing?.notes as string) ?? '')
+  const [error, setError] = useState('')
 
   const toggleCard = (id: string) => {
     setCardAssignments(prev => {
@@ -749,6 +800,15 @@ function CardsAssignForm({ existing, shoot, editing, onSubmit }: { existing?: Re
   // SD Cards table so the resource list reflects it. Don't touch Borrowed/Damaged
   // etc. cards that aren't in this assignment.
   const submitCards = async () => {
+    // Every selected card must be assigned to a crew member.
+    const unassigned = cardAssignments.filter(e => !e.assignedTo)
+    if (unassigned.length > 0) {
+      const nums = unassigned.map(e => sdCards.find(c => c.id === e.cardId)?.number ?? e.cardId)
+      setError(`Assign a crew member to every selected card before continuing: ${nums.join(', ')}`)
+      return
+    }
+    setError('')
+
     const assignedIds = new Set(cardAssignments.map(e => e.cardId))
     await Promise.all(
       [...assignedIds].map(id => {
@@ -848,6 +908,7 @@ function CardsAssignForm({ existing, shoot, editing, onSubmit }: { existing?: Re
         </div>
       </div>
       <FormField label="Notes"><textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Card allocation notes..." /></FormField>
+      {error && <p style={{ color: 'crimson', fontSize: 12, margin: '4px 0 0' }}>{error}</p>}
       <div className="modal-actions" style={{ marginTop: 8 }}>
         <button type="button" className="btn btn-primary" onClick={submitCards}><Check size={14}/> Assign Cards</button>
       </div>
@@ -1592,15 +1653,17 @@ export function WorkflowTimeline({ shoot, onStage, onStageFormSubmit, readOnly =
   const handleSubmit = (stage: WorkflowStage, data: Record<string, unknown>) => {
     // Guard: the actual shoot (Shoot Day Notes) can't be started before the
     // scheduled date. Editing an already-submitted stage is still allowed.
+    // The user CAN start the shoot and enter Shoot Day Notes early, but cannot
+    // assign SD cards before the scheduled shoot day.
     const isFresh = editingStage !== stage && !shoot.stageFormData?.[stage]
-    if (isFresh && stage === 'Shoot Day Notes') {
+    if (isFresh && stage === 'Cards Assign') {
       const sd = scheduledDate()
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       if (sd && today < sd) {
         setBlockMsg(
           `This shoot is scheduled for ${sd.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}. ` +
-          `You can't start the shoot day before the scheduled date.`
+          `You can't assign SD cards before the scheduled shoot day.`
         )
         return
       }

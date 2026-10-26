@@ -1,7 +1,7 @@
 import { Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { activityApi } from '../api'
-import { AppLayout, PageHeader } from '../components'
+import { AppLayout, PageHeader, Pagination, usePagination } from '../components'
 import { formatActivityIST } from '../data'
 import type { Activity } from '../types'
 
@@ -43,6 +43,8 @@ export function ActivityPage() {
     return matchSearch && matchCat
   })
 
+  const { page, setPage, totalPages, pageItems, total, pageSize } = usePagination(filtered, 10)
+
   return (
     <AppLayout>
       <PageHeader title="Activity" subtitle="Complete production history" />
@@ -80,7 +82,7 @@ export function ActivityPage() {
         )}
 
         <div className="activity-list large">
-          {filtered.map(a => (
+          {pageItems.map(a => (
             <div className="activity-row" key={a.id}>
               <span className="activity-dot" />
               <div>
@@ -94,6 +96,7 @@ export function ActivityPage() {
             </div>
           ))}
         </div>
+        <Pagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} onPage={setPage} />
       </section>
     </AppLayout>
   )

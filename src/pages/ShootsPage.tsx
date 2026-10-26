@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { shootsApi } from '../api'
 import { useAuth, useCanWrite } from '../auth'
-import { AppLayout, Badge, EmptyState, FormField, Modal, PageHeader, SearchFilter, ShootTypeSelect, statusTone } from '../components'
+import { AppLayout, Badge, EmptyState, FormField, Modal, PageHeader, Pagination, SearchFilter, ShootTypeSelect, statusTone, usePagination } from '../components'
 import { workflowStages } from '../data'
 import { ButtonSpinner, Loader } from '../Spinner'
 import type { Shoot } from '../types'
@@ -126,6 +126,8 @@ export function ShootsPage() {
       (stage === 'All' || s.currentStage === stage)
   )
 
+  const { page, setPage, totalPages, pageItems, total, pageSize } = usePagination(filtered, 10)
+
   return (
     <AppLayout>
       <PageHeader
@@ -162,7 +164,7 @@ export function ShootsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(s => (
+                {pageItems.map(s => (
                   <tr key={s.id}>
                     <td>
                       <Link className="table-primary" to={`/shoots/${s.id}`}>{s.name}</Link>
@@ -191,6 +193,7 @@ export function ShootsPage() {
                 ))}
               </tbody>
             </table>
+            <Pagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} onPage={setPage} />
           </div>
         )}
         {!loading && filtered.length === 0 && !error && (

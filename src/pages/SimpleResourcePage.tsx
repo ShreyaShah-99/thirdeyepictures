@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { activityApi, crewApi, equipmentApi, hardDrivesApi, sdCardsApi, shootsApi, usersApi, type Equipment, type RegisteredUser } from '../api'
 import { useAuth, useCanDo, useCanWrite } from '../auth'
-import { AppLayout, Badge, FormField, Modal, PageHeader, SearchFilter, statusTone } from '../components'
+import { AppLayout, Badge, FormField, Modal, PageHeader, Pagination, SearchFilter, statusTone, usePagination } from '../components'
 import { ButtonSpinner, Loader } from '../Spinner'
 import type { CrewMember, HardDrive as HardDriveType, SDCard } from '../types'
 
@@ -544,12 +544,12 @@ function BorrowModal({ kind, item, onClose, onBorrow }: {
 // ─── View Details Modal (sd / hard / equipment) ──────────────────────────────
 // Read-only activity/history for a single device: borrow dates, current usage,
 // and per-shoot history where available.
-function DetailRow({ label, value }: { label: string; value?: string | number | null }) {
+function DetailRow({ label, value, danger }: { label: string; value?: string | number | null; danger?: boolean }) {
   if (value === undefined || value === null || value === '') return null
   return (
     <div className="view-field" style={{ marginBottom: 6 }}>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong style={danger ? { color: '#c0392b' } : undefined}>{value}</strong>
     </div>
   )
 }
@@ -570,15 +570,30 @@ function ViewDetailsModal({ kind, item, currentShoot, onClose }: {
   // Hard drive shoot list (array of { shootName, client, date, folder, size, backup }).
   const hdShoots: any[] = Array.isArray(item?.shoots) ? item.shoots : []
 
-  const isBorrowed = item?.status === 'Borrowed'
+  const isBorrowed = item?.status === 'Borrowed' || !!item?.borrowedBy
 
   return (
     <Modal open={!!item} title={title} onClose={onClose}>
       {item && (
         <div className="stage-form-view">
+          {/* Prominent borrowed banner */}
+          {isBorrowed && (
+            <div
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                background: '#fbe9e7', border: '1px solid #e8b4ad', color: '#c0392b',
+                borderRadius: 8, padding: '8px 12px', marginBottom: 12,
+                fontSize: 13, fontWeight: 600,
+              }}
+            >
+              <ShieldOff size={15} />
+              <span>This item is currently BORROWED{item.borrowedBy ? ` by ${item.borrowedBy}` : ''}.</span>
+            </div>
+          )}
+
           {/* Common fields */}
           <div className="form-grid">
-            <DetailRow label="Status" value={item.status} />
+            <DetailRow label="Status" value={item.status} danger={isBorrowed} />
             {kind === 'sd'   && <DetailRow label="Brand" value={item.brand} />}
             {kind === 'sd'   && <DetailRow label="Capacity" value={item.capacity} />}
             {kind === 'sd'   && <DetailRow label="Serial" value={item.serial} />}
@@ -593,14 +608,19 @@ function ViewDetailsModal({ kind, item, currentShoot, onClose }: {
 
           {/* Borrow activity — sd + equipment */}
           {(kind === 'sd' || kind === 'equipment') && (isBorrowed || item.borrowedBy) && (
-            <div style={{ marginTop: 10 }}>
-              <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 6 }}>
+            <div
+              style={{
+                marginTop: 10, padding: '10px 12px', borderRadius: 8,
+                background: '#fdf2f0', border: '1px solid #f0cfc9',
+              }}
+            >
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#c0392b', display: 'block', marginBottom: 6 }}>
                 Borrow Activity
               </span>
               <div className="form-grid">
-                <DetailRow label="Borrowed By" value={item.borrowedBy} />
-                <DetailRow label="Pickup Date" value={item.pickupDate} />
-                <DetailRow label="Expected Return" value={item.returnDate} />
+                <DetailRow label="Borrowed By" value={item.borrowedBy} danger />
+                <DetailRow label="Pickup Date" value={item.pickupDate} danger />
+                <DetailRow label="Expected Return" value={item.returnDate} danger />
               </div>
               <DetailRow label="Borrow Notes" value={item.borrowNotes} />
             </div>
@@ -754,7 +774,7 @@ export function SimpleResourcePage({
 
   // Build a uniform row model for the table.
   // code = short id/number, name, serial, category, status, holder (borrower/owner).
-  type Row = { id: string; code: string; name: string; serial: string; category: string; status: string; holder: string }
+  type Row = { id: string; code: string; name: string; serial: string; category: string; status: string; holder: string; borrowed?: boolean; borrowedBy?: string }
   const rows: Row[] =
     kind === 'team'
       ? localMembers.filter(x => x.name?.trim()).map(x => {
@@ -765,18 +785,24 @@ export function SimpleResourcePage({
           return { id: x.id, code: '', name: x.name, serial: x.email, category: x.role, status, holder: `${n} shoot${n === 1 ? '' : 's'}` }
         })
       : kind === 'sd'
-        ? localSDCards.map((x: any) => ({ id: x.id, code: x.number, name: `${x.brand} ${x.capacity}`, serial: x.serial || '', category: x.capacity, status: x.status, holder: x.status === 'Borrowed' ? (x.borrowedBy || '') : (x.owner || '') }))
+        ? localSDCards.map((x: any) => {
+            const borrowed = x.status === 'Borrowed' || !!x.borrowedBy
+            return { id: x.id, code: x.number, name: `${x.brand} ${x.capacity}`, serial: x.serial || '', category: x.capacity, status: x.status, holder: borrowed ? (x.borrowedBy || '') : (x.owner || ''), borrowed, borrowedBy: x.borrowedBy || '' }
+          })
         : kind === 'hard'
           ? localDrives.map((x: any) => ({ id: x.id, code: x.name, name: `${x.brand} · ${x.capacity} TB`, serial: x.serial || '', category: `${x.capacity} TB`, status: x.status, holder: x.owner || x.location || '' }))
           : localEquipment.map((x: any) => {
               const inShoot = shootByEquipment[x.name]
-              // Borrowed takes precedence; otherwise status is driven by actual
-              // shoot usage so removed items show Available again.
-              const status = x.status === 'Borrowed' ? 'Borrowed' : inShoot ? 'Assigned' : 'Available'
-              const holder = x.status === 'Borrowed'
-                ? (x.borrowedBy || '')
+              // An item is "borrowed" if its record says so OR it still carries a
+              // borrowedBy — the Equipment Assign flow can overwrite `status` to
+              // 'Assigned' while the item is physically borrowed, so check both.
+              const borrowed = x.status === 'Borrowed' || !!x.borrowedBy
+              const status = borrowed ? 'Borrowed' : inShoot ? 'Assigned' : 'Available'
+              // Holder shows the borrower; if it's ALSO on a shoot, note that too.
+              const holder = borrowed
+                ? `${x.borrowedBy || 'Borrowed'}${inShoot ? ` · Shoot: ${inShoot}` : ''}`
                 : inShoot ? `Shoot: ${inShoot}` : (x.owner || '')
-              return { id: x.id, code: x.id?.slice(0, 8) ?? '', name: x.name, serial: '', category: x.type, status, holder }
+              return { id: x.id, code: x.id?.slice(0, 8) ?? '', name: x.name, serial: '', category: x.type, status, holder, borrowed, borrowedBy: x.borrowedBy || '' }
             })
 
   const filtered = rows.filter(r => {
@@ -785,11 +811,13 @@ export function SimpleResourcePage({
     return matchSearch && matchStatus
   })
 
+  const { page, setPage, totalPages, pageItems, total, pageSize } = usePagination(filtered, 10)
+
   // Summary counts for the stat cards (device kinds only).
   const countBy = (pred: (r: Row) => boolean) => rows.filter(pred).length
   const stats = [
     { label: 'Available', icon: CheckCircle2, tone: '#2e9e5b', bg: '#e8f6ee', value: countBy(r => r.status === 'Available') },
-    { label: 'Borrowed',  icon: Package,      tone: '#2f6fb0', bg: '#e8f0fa', value: countBy(r => r.status === 'Borrowed') },
+    { label: 'Borrowed',  icon: Package,      tone: '#c0392b', bg: '#fbe9e7', value: countBy(r => r.status === 'Borrowed') },
     { label: 'Assigned',  icon: Clock,        tone: '#d98324', bg: '#fbefe0', value: countBy(r => r.status === 'Assigned' || r.status === 'In Use') },
     { label: 'Retired',   icon: AlertCircle,  tone: '#c0392b', bg: '#fbe9e7', value: countBy(r => ['Retired','Damaged','Lost'].includes(r.status)) },
   ]
@@ -926,7 +954,7 @@ export function SimpleResourcePage({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(r => (
+                {pageItems.map(r => (
                   <tr key={r.id}>
                     {kind !== 'team' && <td className="inv-code">{r.code || '—'}</td>}
                     <td>
@@ -945,8 +973,15 @@ export function SimpleResourcePage({
                       {r.serial && <div className="inv-serial">SN: {r.serial}</div>}
                     </td>
                     <td>{r.category || '—'}</td>
-                    <td><Badge tone={statusTone(r.status)}>{r.status}</Badge></td>
-                    <td>{r.holder || '—'}</td>
+                    <td>
+                      <Badge tone={statusTone(r.status)}>{r.status}</Badge>
+                      {r.borrowed && r.status !== 'Borrowed' && (
+                        <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: '#fff', background: '#c0392b', borderRadius: 999, padding: '2px 7px', textTransform: 'uppercase' }}>
+                          Borrowed
+                        </span>
+                      )}
+                    </td>
+                    <td style={r.borrowed ? { color: '#c0392b', fontWeight: 600 } : undefined}>{r.holder || '—'}</td>
                     {canWrite && (
                       <td className="inv-action-col">
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
@@ -956,7 +991,7 @@ export function SimpleResourcePage({
                             </button>
                           )}
                           {(kind === 'sd' || kind === 'equipment') && (
-                            r.status === 'Borrowed' ? (
+                            r.borrowed ? (
                               <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '3px 10px', width: 84, textAlign: 'center' }} onClick={() => handleReturn(r.id)}>Return</button>
                             ) : (
                               <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '3px 10px', width: 84, textAlign: 'center' }} onClick={() => setBorrowTarget(findRaw(r.id))}>Checkout</button>
@@ -986,6 +1021,7 @@ export function SimpleResourcePage({
                 )}
               </tbody>
             </table>
+            <Pagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} onPage={setPage} />
           </div>
         )}
       </section>

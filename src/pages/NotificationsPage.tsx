@@ -2,7 +2,7 @@ import { Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { notificationsApi } from '../api'
 import { useAuth } from '../auth'
-import { AppLayout, PageHeader } from '../components'
+import { AppLayout, PageHeader, Pagination, usePagination } from '../components'
 import type { Notification } from '../types'
 
 function BellIcon() {
@@ -40,6 +40,8 @@ export function NotificationsPage() {
     }
   }
 
+  const { page, setPage, totalPages, pageItems, total, pageSize } = usePagination(notifications, 10)
+
   return (
     <AppLayout>
       <PageHeader title="Notifications" subtitle="Stay on top of production updates" />
@@ -50,7 +52,7 @@ export function NotificationsPage() {
           <p style={{ padding: 16, color: '#888', fontSize: 13 }}>No notifications yet.</p>
         )}
 
-        {notifications.map(n => (
+        {pageItems.map(n => (
           <div
             className={n.read ? 'notification read' : 'notification'}
             key={n.id}
@@ -78,6 +80,7 @@ export function NotificationsPage() {
             )}
           </div>
         ))}
+        <Pagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} onPage={setPage} />
       </section>
     </AppLayout>
   )

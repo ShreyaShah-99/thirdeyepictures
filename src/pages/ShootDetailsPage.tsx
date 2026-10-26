@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarDays, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CalendarDays, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { shootsApi } from '../api'
@@ -136,8 +136,28 @@ export function ShootDetails() {
     }
   }
 
+  // Data copy is "pending" when the shoot has progressed to/past Data Copy but
+  // the Data Copy stage isn't completed, or any card in it is still 'Pending'.
+  const dataCopyPending = (() => {
+    const dc = shoot.workflow['Data Copy']
+    const reached = workflowStages.indexOf(shoot.currentStage) >= workflowStages.indexOf('Data Copy')
+    if (!reached) return false
+    if (dc?.status !== 'completed') return true
+    const cardStatus = (shoot.stageFormData?.['Data Copy']?.cardCopyStatus as { status: string }[] | undefined) ?? []
+    return cardStatus.some(c => c.status !== 'Copied')
+  })()
+
   return (
     <AppLayout>
+      {dataCopyPending && (
+        <div
+          className="role-notice"
+          style={{ marginBottom: 16, background: '#fbe9e7', border: '1px solid #e8b4ad', color: '#c0392b' }}
+        >
+          <AlertTriangle size={14} />
+          <span>Data copy is pending for this shoot. Complete the Data Copy stage before delivery.</span>
+        </div>
+      )}
       <div className="details-head">
         <button type="button" className="icon-btn back-btn" onClick={() => navigate('/shoots')}>
           <ArrowLeft size={18} />

@@ -2,7 +2,7 @@ import { CheckCircle2, Circle, ClipboardList, Clock, Pencil, Plus, Trash2, X } f
 import { useEffect, useState } from 'react'
 import { activityApi, tasksApi, type Task } from '../api'
 import { useAuth, useCanWrite } from '../auth'
-import { AppLayout, Badge, FormField, Modal, PageHeader, SearchFilter } from '../components'
+import { AppLayout, Badge, FormField, Modal, PageHeader, Pagination, SearchFilter, usePagination } from '../components'
 import { useResources } from '../resources'
 
 type TaskStatus = 'Pending' | 'In Progress' | 'Completed'
@@ -231,6 +231,8 @@ export function TasksPage() {
   const clearFilters = () => { setMemberFilter(''); setStatusFilter(''); setSearch('') }
   const hasFilters = memberFilter || statusFilter || search
 
+  const { page, setPage, totalPages, pageItems, total, pageSize } = usePagination(filtered, 10)
+
   return (
     <AppLayout>
       <PageHeader
@@ -319,7 +321,7 @@ export function TasksPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(task => (
+                {pageItems.map(task => (
                   <tr key={task.id}>
                     <td>
                       <div className="inv-name">{task.title}</div>
@@ -371,6 +373,7 @@ export function TasksPage() {
                 )}
               </tbody>
             </table>
+            <Pagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} onPage={setPage} />
           </div>
         )}
       </section>
