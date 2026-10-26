@@ -42,7 +42,9 @@ export function ResourcesProvider({ children }: { children: ReactNode }) {
       ])
       // Guard against non-array responses (e.g. an error object) so consumers
       // can always safely call .find/.filter/.map on these.
-      setMembers(Array.isArray(crew) ? crew : [])
+      // Also drop "ghost" crew records with no name — they otherwise render as
+      // a bare "—" option in every member dropdown.
+      setMembers(Array.isArray(crew) ? crew.filter(m => m?.name?.trim()) : [])
       setSdCards(Array.isArray(cards) ? cards : [])
       setHardDrives(Array.isArray(drives) ? drives : [])
       setEquipment(Array.isArray(equip) ? equip : [])

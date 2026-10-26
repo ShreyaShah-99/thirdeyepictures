@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { activityApi, shootsApi } from '../api'
 import { AppLayout, Badge, MiniStat, PageHeader, SectionTitle } from '../components'
+import { formatActivityIST } from '../data'
 import { Loader } from '../Spinner'
 import type { Activity, Shoot } from '../types'
 
@@ -117,7 +118,7 @@ export function Dashboard() {
                 <span className="activity-dot" />
                 <div>
                   <strong>{a.text}</strong>
-                  <span>{a.time} · {a.user}</span>
+                  <span>{formatActivityIST(a)} · {a.user}</span>
                 </div>
               </div>
             ))}

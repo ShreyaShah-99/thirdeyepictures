@@ -169,7 +169,12 @@ export type StageFormData =
 export interface Activity {
   id: string
   text: string
+  /** Date + time stamp, e.g. "23 Oct 2026, 02:30 PM". */
   time: string
+  /** Date-only portion (new entries). Older entries may not have it. */
+  date?: string
+  /** ISO timestamp set by the backend. Used to render an accurate IST stamp. */
+  createdAt?: string
   shoot?: string
   user: string
 }
@@ -180,4 +185,7 @@ export interface Notification {
   detail: string
   time: string
   read: boolean
+  /** Target user this notification was addressed to (null = broadcast). */
+  userEmail?: string | null
+  userName?: string | null
 }

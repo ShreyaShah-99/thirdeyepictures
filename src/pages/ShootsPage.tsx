@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { shootsApi } from '../api'
 import { useAuth, useCanWrite } from '../auth'
-import { AppLayout, Badge, EmptyState, FormField, Modal, PageHeader, SearchFilter, statusTone } from '../components'
+import { AppLayout, Badge, EmptyState, FormField, Modal, PageHeader, SearchFilter, ShootTypeSelect, statusTone } from '../components'
 import { workflowStages } from '../data'
 import { ButtonSpinner, Loader } from '../Spinner'
 import type { Shoot } from '../types'
@@ -30,7 +30,7 @@ function ShootModal({
 }) {
   const [name, setName] = useState('')
   const [client, setClient] = useState('')
-  const [type, setType] = useState('Couple')
+  const [type, setType] = useState('')
   const [date, setDate] = useState('')
   const [venue, setVenue] = useState('')
   const [city, setCity] = useState('Ahmedabad')
@@ -66,11 +66,7 @@ function ShootModal({
           <input value={client} onChange={e => setClient(e.target.value)} placeholder="Client name" />
         </FormField>
         <FormField label="Shoot Type">
-          <select value={type} onChange={e => setType(e.target.value)}>
-            {['Wedding','Couple','Corporate','Product','Fashion','Event','Pre-Wedding','Commercial','Photography','Videography','Other'].map(x => (
-              <option key={x}>{x}</option>
-            ))}
-          </select>
+          <ShootTypeSelect value={type} onChange={e => setType(e.target.value)} />
         </FormField>
         <FormField label="Shoot Date">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} />

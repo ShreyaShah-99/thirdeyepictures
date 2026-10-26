@@ -1,8 +1,51 @@
-import type { Activity, CrewMember, HardDrive, Notification, SDCard, Shoot, WorkflowStage } from './types'
+import type { Activity, CrewMember, HardDrive, Notification, SDCard, Shoot, WorkflowStage } from './types';
 
 export const workflowStages: WorkflowStage[] = [
   'Inquiry', 'Confirm', 'Schedule', 'Crew Assign', 'Equipment Assign', 'Shoot Day Notes',
   'Cards Assign', 'Wrapped', 'Data Copy', 'Sorting', 'Editing', 'Delivered'
+]
+
+/**
+ * Render an activity's timestamp as Indian date + time (IST), independent of
+ * what the backend stored or where it runs. Prefers the ISO `createdAt`
+ * (timezone-safe); falls back to the stored strings for older entries.
+ */
+export function formatActivityIST(a: Pick<Activity, 'createdAt' | 'date' | 'time'>): string {
+  if (a.createdAt) {
+    const d = new Date(a.createdAt)
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleString('en-IN', {
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+        timeZone: 'Asia/Kolkata',
+      })
+    }
+  }
+  if (a.date && a.time && !a.time.includes(a.date)) return `${a.date}, ${a.time}`
+  return a.time ?? ''
+}
+
+/**
+ * Canonical Shoot Type options, grouped. Shared by the Inquiry stage form and
+ * the "Create New Shoot" modal so both dropdowns stay identical.
+ */
+export const SHOOT_TYPE_GROUPS: { label: string; options: string[] }[] = [
+  {
+    label: 'Events & Celebrations',
+    options: ['Wedding','Pre-Wedding','Engagement','Birthday','Anniversary','Babyshower','Housewarming','Office Inauguration','Farewell & Retirement Parties','Corporate Event','Cultural Event','Social Event','Collage Event','Product Launches & Openings','BNI Shoot','V2VBN Shoot'],
+  },
+  {
+    label: 'Commercial Shoots',
+    options: ['Product Shoot','Brand Shoot','Podcast Shoot','Advertising Shoot','Car Delivery Shoot','Fashion Shoot','Jewellery Shoot','Industrial Shoot','Food / Restaurant Shoot','Podcast / Interview Shoot','Social Media Content Shoot','BTS Shoot','Travel Shoot'],
+  },
+  {
+    label: 'Interior & Architecture',
+    options: ['Interior Shoot','Architecture Shoot','Real Estate Shoot','Hotel / Resort Shoot','Construction Progress Shoot'],
+  },
+  {
+    label: 'Other',
+    options: ['Other'],
+  },
 ]
 
 const workflow = (currentIndex: number, notes = '') => {

@@ -2,6 +2,7 @@ import { Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { activityApi } from '../api'
 import { AppLayout, PageHeader } from '../components'
+import { formatActivityIST } from '../data'
 import type { Activity } from '../types'
 
 // Activity has no stored category, so infer one from the text keywords. This
@@ -85,7 +86,7 @@ export function ActivityPage() {
               <div>
                 <strong>{a.text}</strong>
                 <span>
-                  {a.time} · {a.user}
+                  {formatActivityIST(a)} · {a.user}
                   {a.shoot ? ` · ${a.shoot}` : ''}
                   {` · ${categoryOf(a)}`}
                 </span>

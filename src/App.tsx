@@ -3,6 +3,7 @@ import { useAuth } from './auth'
 import { ActivityPage } from './pages/ActivityPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { Dashboard } from './pages/DashboardPage'
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { HardDriveDetailsPage } from './pages/HardDriveDetailsPage'
 import { LoginPage } from './pages/LoginPage'
 import { NotificationsPage } from './pages/NotificationsPage'
@@ -25,6 +26,7 @@ function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/shoots" element={<ProtectedRoute><ShootsPage /></ProtectedRoute>} />
       <Route path="/shoots/:id" element={<ProtectedRoute><ShootDetails /></ProtectedRoute>} />

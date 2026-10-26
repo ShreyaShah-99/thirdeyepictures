@@ -121,7 +121,10 @@ export function LoginPage() {
               </button>
             </form>
 
-            <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: '#7c7572' }}>
+            <p style={{ marginTop: 14, fontSize: 12, textAlign: 'center', color: '#7c7572' }}>
+              <Link to="/forgot-password">Forgot password?</Link>
+            </p>
+            <p style={{ marginTop: 4, fontSize: 12, textAlign: 'center', color: '#7c7572' }}>
               New here? <Link to="/signup">Create an account</Link>
             </p>
           </>

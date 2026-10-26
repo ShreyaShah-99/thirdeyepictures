@@ -1,31 +1,31 @@
 import {
-  Activity, Archive, Bell, CalendarDays, Camera, Check,
-  ClipboardList,
-  Clock3,
-  Crown,
-  Database,
-  ExternalLink,
-  FileText,
-  HardDrive, LayoutDashboard,
-  Lock,
-  LogOut,
-  MapPin,
-  Menu, Package,
-  Pencil,
-  Plus,
-  Save,
-  Search,
-  Shield,
-  Trash2,
-  UserRound,
-  Users, X
+    Activity, Archive, Bell, CalendarDays, Camera, Check,
+    ClipboardList,
+    Clock3,
+    Crown,
+    Database,
+    ExternalLink,
+    FileText,
+    HardDrive, LayoutDashboard,
+    Lock,
+    LogOut,
+    MapPin,
+    Menu, Package,
+    Pencil,
+    Plus,
+    Save,
+    Search,
+    Shield,
+    Trash2,
+    UserRound,
+    Users, X
 } from 'lucide-react'
 import React, { useEffect, useState, type ReactNode } from 'react'
-import { Link, NavLink, useNavigate } from 'react-router-dom'
-import { activityApi, crewApi, equipmentApi, sdCardsApi, shootsApi, tasksApi } from './api'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { activityApi, crewApi, equipmentApi, notificationsApi, sdCardsApi, shootsApi, tasksApi } from './api'
 import logoImg from './assets/Images/ThirdEye_Logo.png'
 import { useAuth } from './auth'
-import { workflowStages } from './data'
+import { SHOOT_TYPE_GROUPS, workflowStages } from './data'
 import { useResources } from './resources'
 import type { Shoot, WorkflowStage } from './types'
 
@@ -61,6 +61,25 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // Unread notification count for the logged-in user. The backend already
+  // scopes GET /notifications to the current user, so counting unread here is
+  // per-user by construction. Refreshes on navigation and on a slow poll.
+  const [unread, setUnread] = useState(0)
+  useEffect(() => {
+    if (!user) { setUnread(0); return }
+    let cancelled = false
+    const refreshUnread = () => {
+      notificationsApi.list()
+        .then(list => { if (!cancelled) setUnread(list.filter(n => !n.read).length) })
+        .catch(() => { /* leave count unchanged on failure */ })
+    }
+    refreshUnread()
+    const id = setInterval(refreshUnread, 60000)
+    return () => { cancelled = true; clearInterval(id) }
+    // Re-check when the route changes (e.g. after viewing/marking notifications).
+  }, [user, location.pathname])
 
   const handleLogout = () => {
     logout()
@@ -105,7 +124,21 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <button className="mobile-menu icon-btn" onClick={() => setMobileOpen(true)}><Menu size={20}/></button>
           <div className="topbar-title">Production workspace</div>
           <div className="topbar-actions">
-            <Link className="icon-btn" to="/notifications"><Bell size={18}/><span className="notification-dot"/></Link>
+            <Link className="icon-btn" to="/notifications" style={{ position: 'relative' }} title={unread ? `${unread} unread` : 'Notifications'}>
+              <Bell size={18}/>
+              {unread > 0 && (
+                <span
+                  style={{
+                    position: 'absolute', top: -4, right: -4, minWidth: 16, height: 16,
+                    padding: '0 4px', borderRadius: 8, background: '#c0392b', color: '#fff',
+                    fontSize: 10, fontWeight: 700, lineHeight: '16px', textAlign: 'center',
+                    display: 'inline-block',
+                  }}
+                >
+                  {unread > 99 ? '99+' : unread}
+                </span>
+              )}
+            </Link>
             <div className="top-avatar">{user?.initials ?? 'AU'}</div>
           </div>
         </header>
@@ -129,6 +162,26 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
 
 export function FormField({ label, children }: { label: string; children: ReactNode }) {
   return <label className="field"><span>{label}</span>{children}</label>
+}
+
+/**
+ * Shared Shoot Type dropdown. Used by the Inquiry stage form and the
+ * "Create New Shoot" modal so both present identical, grouped options.
+ */
+export function ShootTypeSelect({ value, onChange }: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
+}) {
+  return (
+    <select value={value} onChange={onChange}>
+      <option value="">Select type</option>
+      {SHOOT_TYPE_GROUPS.map(group => (
+        <optgroup key={group.label} label={group.label}>
+          {group.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </optgroup>
+      ))}
+    </select>
+  )
 }
 
 // ─── View-only field ──────────────────────────────────────────────────────────
@@ -159,15 +212,18 @@ function ViewField({ label, value }: { label: string; value?: string | boolean |
 
 // ─── Stage forms ─────────────────────────────────────────────────────────────
 
-function InquiryForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
+function InquiryForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
+  // When a shoot was created directly (New Shoot modal), the top-level fields
+  // already hold name/client/type/date — seed the inquiry form from them so the
+  // user isn't retyping what the shoot already knows.
   const [form, setForm] = useState({
-    eventName: (existing?.eventName as string) ?? '',
-    clientName: (existing?.clientName as string) ?? '',
+    eventName: (existing?.eventName as string) ?? shoot?.name ?? '',
+    clientName: (existing?.clientName as string) ?? shoot?.client ?? '',
     email: (existing?.email as string) ?? '',
     phone: (existing?.phone as string) ?? '',
-    eventType: (existing?.eventType as string) ?? '',
-    eventDate: (existing?.eventDate as string) ?? '',
-    eventTime: (existing?.eventTime as string) ?? '',
+    eventType: (existing?.eventType as string) ?? shoot?.type ?? '',
+    eventDate: (existing?.eventDate as string) ?? shoot?.date ?? '',
+    eventTime: (existing?.eventTime as string) ?? shoot?.time ?? '',
     message: (existing?.message as string) ?? '',
   })
   const [error, setError] = useState('')
@@ -207,21 +263,7 @@ function InquiryForm({ existing, editing, onSubmit }: { existing?: Record<string
         <FormField label="Email"><input type="email" value={form.email} onChange={set('email')} placeholder="email@example.com" /></FormField>
         <FormField label="Phone"><input value={form.phone} onChange={set('phone')} placeholder="+91 00000 00000" /></FormField>
         <FormField label="Shoot Type">
-          <select value={form.eventType} onChange={set('eventType')}>
-            <option value="">Select type</option>
-            <optgroup label="Events & Celebrations">
-              {['Wedding','Pre-Wedding','Engagement','Birthday','Anniversary','Babyshower','Housewarming','Office Inauguration','Farewell & Retirement Parties','Corporate Event','Cultural Event','Social Event','Collage Event','Product Launches & Openings','BNI Shoot','V2VBN Shoot'].map(x=><option key={x}>{x}</option>)}
-            </optgroup>
-            <optgroup label="Commercial Shoots">
-              {['Product Shoot','Brand Shoot','Podcast Shoot','Advertising Shoot','Car Delivery Shoot','Fashion Shoot','Jewellery Shoot','Industrial Shoot','Food / Restaurant Shoot','Podcast / Interview Shoot','Social Media Content Shoot','BTS Shoot','Travel Shoot'].map(x=><option key={x}>{x}</option>)}
-            </optgroup>
-            <optgroup label="Interior & Architecture">
-              {['Interior Shoot','Architecture Shoot','Real Estate Shoot','Hotel / Resort Shoot','Construction Progress Shoot'].map(x=><option key={x}>{x}</option>)}
-            </optgroup>
-            <optgroup label="Other">
-              <option>Other</option>
-            </optgroup>
-          </select>
+          <ShootTypeSelect value={form.eventType} onChange={set('eventType')} />
         </FormField>
         <FormField label="Shoot Date *"><input type="date" value={form.eventDate} onChange={set('eventDate')} /></FormField>
         <FormField label="Shoot Time"><input type="time" value={form.eventTime} onChange={set('eventTime')} /></FormField>
@@ -273,16 +315,29 @@ function ConfirmForm({ existing, editing, onSubmit }: { existing?: Record<string
   )
 }
 
-function ScheduleForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
+function ScheduleForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
+  // Prefill date/time from the Inquiry stage when Schedule hasn't been filled
+  // yet, so the scheduler starts from what the client already told us.
+  const inquiry = (shoot?.stageFormData?.['Inquiry'] as Record<string, unknown> | undefined)
+  const inquiryDate = (inquiry?.eventDate as string) ?? ''
+  const inquiryTime = (inquiry?.eventTime as string) ?? ''
+  // The client from the inquiry is a sensible default on-site contact.
+  const inquiryClient = (inquiry?.clientName as string) ?? ''
+  const inquiryPhone = (inquiry?.phone as string) ?? ''
+  // Venue/City entered in the "Create New Shoot" modal live on the shoot's
+  // top-level fields — prefill them here so they aren't re-typed.
+  const shootVenue = shoot?.venue ?? ''
+  const shootCity = shoot?.city ?? ''
+
   const [form, setForm] = useState({
-    shootDate: (existing?.shootDate as string) ?? '',
-    startTime: (existing?.startTime as string) ?? '',
+    shootDate: (existing?.shootDate as string) ?? inquiryDate,
+    startTime: (existing?.startTime as string) ?? inquiryTime,
     endTime: (existing?.endTime as string) ?? '',
-    venue: (existing?.venue as string) ?? '',
-    city: (existing?.city as string) ?? '',
+    venue: (existing?.venue as string) ?? shootVenue,
+    city: (existing?.city as string) ?? shootCity,
     mapLink: (existing?.mapLink as string) ?? '',
-    contactPersonName: (existing?.contactPersonName as string) ?? '',
-    contactPersonPhone: (existing?.contactPersonPhone as string) ?? '',
+    contactPersonName: (existing?.contactPersonName as string) ?? inquiryClient,
+    contactPersonPhone: (existing?.contactPersonPhone as string) ?? inquiryPhone,
     notes: (existing?.notes as string) ?? '',
   })
   const [error, setError] = useState('')
@@ -409,7 +464,19 @@ function CrewAssignForm({ existing, shoot, editing, onSubmit }: { existing?: Rec
       ...toFree.map(id => crewApi.update(id, { availability: 'Available' }).catch((e: unknown) => console.error('crew unassign failed', e))),
     ])
     onSubmit({ crewAssignments, notes })
-    activityApi.log(`${nowIds.length} crew member(s) assigned`).catch(() => {})
+    // Log the actual member names (not just a count) so the activity feed is
+    // readable. Resolve names from the selected crewAssignments directly.
+    const assignedNames = crewAssignments
+      .map(e => {
+        const name = members.find(m => m.id === e.crewId)?.name
+        return name ? `${name} (${e.role})` : null
+      })
+      .filter(Boolean)
+      .join(', ')
+    const crewMsg = assignedNames
+      ? `Crew assigned: ${assignedNames}${shoot ? ` — ${shoot.name}` : ''}`
+      : `${crewAssignments.length} crew member(s) assigned`
+    activityApi.log(crewMsg, shoot?.name, shoot?.id).catch(() => {})
     refresh()
   }
 
@@ -473,28 +540,10 @@ function EquipmentAssignForm({ existing, shoot, editing, onSubmit }: { existing?
   const { members, equipment, refresh } = useResources()
   type EquipmentEntry = { equipment: string; assignedTo: string }
 
-  // Equipment names assigned to OTHER shoots — those are busy and must not be
-  // selectable here (prevents double-booking the same gear across shoots).
-  const [busyElsewhere, setBusyElsewhere] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    let cancelled = false
-    shootsApi.list()
-      .then(shoots => {
-        const names = new Set<string>()
-        for (const sh of shoots) {
-          if (shoot && sh.id === shoot.id) continue // this shoot's own picks stay available
-          const list = (sh.stageFormData?.['Equipment Assign']?.equipmentList as EquipmentEntry[] | undefined) ?? []
-          for (const e of list) names.add(e.equipment)
-        }
-        if (!cancelled) setBusyElsewhere(names)
-      })
-      .catch(() => { if (!cancelled) setBusyElsewhere(new Set()) })
-    return () => { cancelled = true }
-  }, [shoot?.id])
-
-  // Equipment options come from the Equipment resource (added in the Equipment
-  // section), excluding any gear already assigned to another shoot.
-  const equipmentNames = equipment.map(e => e.name).filter(n => !busyElsewhere.has(n))
+  // All equipment is always selectable here — even gear already assigned to
+  // another shoot. (No cross-shoot exclusion; the same item can appear on
+  // multiple shoots.)
+  const equipmentNames = equipment.map(e => e.name)
 
   // Only crew assigned to THIS shoot (in the Crew Assign stage) can be chosen.
   type CrewEntry = { crewId: string; role: string }
@@ -548,7 +597,11 @@ function EquipmentAssignForm({ existing, shoot, editing, onSubmit }: { existing?
 
     await Promise.all([...assignOps, ...freeOps])
     onSubmit({ equipmentList, notes })
-    activityApi.log(`${equipmentList.length} equipment item(s) assigned`).catch(() => {})
+    const equipNames = equipmentList.map(e => e.equipment).filter(Boolean).join(', ')
+    const equipMsg = equipNames
+      ? `Equipment assigned: ${equipNames}${shoot ? ` — ${shoot.name}` : ''}`
+      : `${equipmentList.length} equipment item(s) assigned`
+    activityApi.log(equipMsg, shoot?.name, shoot?.id).catch(() => {})
     refresh()
   }
 
@@ -643,9 +696,16 @@ function ShootDayNotesForm({ existing, editing, onSubmit }: { existing?: Record<
   )
 }
 
-function CardsAssignForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
+function CardsAssignForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const { members, sdCards, refresh } = useResources()
   type CardEntry = { cardId: string; assignedTo: string }
+
+  // Only crew assigned to THIS shoot (in the Crew Assign stage) can be chosen
+  // as the card holder — same rule as Equipment Assign.
+  type CrewEntry = { crewId: string; role: string }
+  const assignedCrewIds = ((shoot?.stageFormData?.['Crew Assign']?.crewAssignments as CrewEntry[] | undefined) ?? [])
+    .map(c => c.crewId)
+  const assignableMembers = members.filter(m => assignedCrewIds.includes(m.id))
 
   const initCards: CardEntry[] = existing?.cardAssignments
     ? (existing.cardAssignments as CardEntry[])
@@ -700,7 +760,18 @@ function CardsAssignForm({ existing, editing, onSubmit }: { existing?: Record<st
       })
     )
     onSubmit({ cardAssignments, notes })
-    activityApi.log(`${assignedIds.size} SD card(s) assigned`).catch(() => {})
+    const cardLabels = cardAssignments
+      .map(e => {
+        const num = sdCards.find(c => c.id === e.cardId)?.number
+        const who = members.find(m => m.id === e.assignedTo)?.name
+        return num ? `${num}${who ? ` → ${who}` : ''}` : null
+      })
+      .filter(Boolean)
+      .join(', ')
+    const cardMsg = cardLabels
+      ? `SD cards assigned: ${cardLabels}${shoot ? ` — ${shoot.name}` : ''}`
+      : `${assignedIds.size} SD card(s) assigned`
+    activityApi.log(cardMsg, shoot?.name, shoot?.id).catch(() => {})
     refresh() // re-pull so the SD Cards list shows the new statuses
   }
 
@@ -763,8 +834,10 @@ function CardsAssignForm({ existing, editing, onSubmit }: { existing?: Record<st
                         onClick={e => e.stopPropagation()}
                         style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #d4cbc6', background: '#fff', cursor: 'pointer' }}
                       >
-                        <option value="">Assign to...</option>
-                        {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        <option value="">
+                          {assignableMembers.length ? 'Assign to...' : 'No crew assigned yet'}
+                        </option>
+                        {assignableMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
                     </div>
                   )
@@ -1003,7 +1076,7 @@ function DataCopyForm({ existing, shoot, editing, onSubmit }: { existing?: Recor
   )
 }
 
-function SortingStageForm({ existing, editing, onSubmit }: { existing?: Record<string, unknown>; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
+function SortingStageForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const { members, hardDrives } = useResources()
   type FileTypeRow = {
     type: 'JPG' | 'RAW' | 'Videos'
@@ -1012,10 +1085,15 @@ function SortingStageForm({ existing, editing, onSubmit }: { existing?: Record<s
     done: boolean
   }
 
+  // The footage was copied to this drive in Data Copy — default BOTH the
+  // "from" drive and the "to" drive to it so the user doesn't reselect either.
+  // (Sorting in place on the same drive is the common case; either can be changed.)
+  const dataCopyDriveId = (shoot?.stageFormData?.['Data Copy']?.driveId as string) ?? ''
+
   const initRows: FileTypeRow[] = (existing?.fileTypeRows as FileTypeRow[]) ?? [
-    { type: 'JPG',    sourceDriveId: '', copyToDriveId: '', done: false },
-    { type: 'RAW',    sourceDriveId: '', copyToDriveId: '', done: false },
-    { type: 'Videos', sourceDriveId: '', copyToDriveId: '', done: false },
+    { type: 'JPG',    sourceDriveId: dataCopyDriveId, copyToDriveId: dataCopyDriveId, done: false },
+    { type: 'RAW',    sourceDriveId: dataCopyDriveId, copyToDriveId: dataCopyDriveId, done: false },
+    { type: 'Videos', sourceDriveId: dataCopyDriveId, copyToDriveId: dataCopyDriveId, done: false },
   ]
 
   const [rows, setRows] = useState<FileTypeRow[]>(initRows)
@@ -1327,8 +1405,29 @@ function EditingStageForm({ existing, shoot, editing, onSubmit }: { existing?: R
 
 function DeliveredStageForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
   const { members } = useResources()
-  type EditTask = { id: string; assignedTo: string; editType: string; notes: string }
+  type EditTask = { id: string; assignedTo: string; editType: string; notes: string; taskId?: string }
   const editingTasks: EditTask[] = (shoot?.stageFormData?.['Editing']?.editingTasks as EditTask[]) ?? []
+
+  // Load the live Tasks table so we can show each editing task's REAL status
+  // (not a hardcoded "Completed") and block delivery until all are done.
+  const [liveTasks, setLiveTasks] = useState<{ id: string; status: string; title?: string }[]>([])
+  useEffect(() => {
+    let cancelled = false
+    tasksApi.list()
+      .then(ts => { if (!cancelled) setLiveTasks(ts as { id: string; status: string; title?: string }[]) })
+      .catch(() => { if (!cancelled) setLiveTasks([]) })
+    return () => { cancelled = true }
+  }, [])
+
+  // Resolve the real status for an editing task by matching its linked taskId.
+  // If it was never pushed to the Tasks table (no taskId), treat as Pending.
+  const statusOf = (t: EditTask): string => {
+    if (!t.taskId) return 'Pending'
+    return liveTasks.find(x => x.id === t.taskId)?.status ?? 'Pending'
+  }
+
+  const allTasksDone = editingTasks.every(t => statusOf(t) === 'Completed')
+  const pendingCount = editingTasks.filter(t => statusOf(t) !== 'Completed').length
 
   const [form, setForm] = useState({
     deliveryType: (existing?.deliveryType as string) ?? '',
@@ -1346,13 +1445,16 @@ function DeliveredStageForm({ existing, shoot, editing, onSubmit }: { existing?:
           <div style={{ marginBottom: 12 }}>
             <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 6 }}>Editing Tasks</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {editingTasks.map(t => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                  <strong>{t.assignedTo}</strong>
-                  <span style={{ color: '#888' }}>{t.editType}</span>
-                  <Badge tone="success">Completed</Badge>
-                </div>
-              ))}
+              {editingTasks.map(t => {
+                const st = statusOf(t)
+                return (
+                  <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                    <strong>{t.assignedTo}</strong>
+                    <span style={{ color: '#888' }}>{t.editType}</span>
+                    <Badge tone={st === 'Completed' ? 'success' : st === 'In Progress' ? 'warning' : 'neutral'}>{st}</Badge>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
@@ -1373,13 +1475,16 @@ function DeliveredStageForm({ existing, shoot, editing, onSubmit }: { existing?:
         <div style={{ marginBottom: 12 }}>
           <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 6 }}>Editing Tasks (from Editing stage)</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {editingTasks.map(t => (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f9f6f4', borderRadius: 6, padding: '6px 10px', border: '1px solid #e8e0db', fontSize: 12 }}>
-                <strong>{t.assignedTo}</strong>
-                <span style={{ color: '#888' }}>{t.editType}</span>
-                <Badge tone="success">Completed</Badge>
-              </div>
-            ))}
+            {editingTasks.map(t => {
+              const st = statusOf(t)
+              return (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f9f6f4', borderRadius: 6, padding: '6px 10px', border: '1px solid #e8e0db', fontSize: 12 }}>
+                  <strong>{t.assignedTo}</strong>
+                  <span style={{ color: '#888' }}>{t.editType}</span>
+                  <Badge tone={st === 'Completed' ? 'success' : st === 'In Progress' ? 'warning' : 'neutral'}>{st}</Badge>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -1399,8 +1504,21 @@ function DeliveredStageForm({ existing, shoot, editing, onSubmit }: { existing?:
         <FormField label="Delivery Link"><input value={form.deliveryLink} onChange={set('deliveryLink')} placeholder="https://..." /></FormField>
       </div>
       <FormField label="Notes"><textarea rows={2} value={form.notes} onChange={set('notes')} placeholder="Delivery notes..." /></FormField>
+      {!allTasksDone && editingTasks.length > 0 && (
+        <p style={{ color: 'crimson', fontSize: 12, margin: '6px 0 0' }}>
+          {pendingCount} editing task{pendingCount === 1 ? '' : 's'} not yet completed. All tasks must be marked Completed before this shoot can be delivered.
+        </p>
+      )}
       <div className="modal-actions" style={{ marginTop: 8 }}>
-        <button type="button" className="btn btn-primary" onClick={() => onSubmit(form)}><Check size={14}/> Mark Delivered</button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => onSubmit(form)}
+          disabled={!allTasksDone}
+          title={allTasksDone ? undefined : 'Complete all editing tasks first'}
+        >
+          <Check size={14}/> Mark Delivered
+        </button>
       </div>
     </div>
   )
@@ -1415,16 +1533,16 @@ function StageForm({ stage, existing, shoot, editing = false, onSubmit }: {
   onSubmit: (d: Record<string, unknown>) => void
 }) {
   switch (stage) {
-    case 'Inquiry':         return <InquiryForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Inquiry':         return <InquiryForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     case 'Confirm':         return <ConfirmForm existing={existing} editing={editing} onSubmit={onSubmit} />
-    case 'Schedule':        return <ScheduleForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Schedule':        return <ScheduleForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     case 'Crew Assign':     return <CrewAssignForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     case 'Equipment Assign': return <EquipmentAssignForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     case 'Shoot Day Notes': return <ShootDayNotesForm existing={existing} editing={editing} onSubmit={onSubmit} />
-    case 'Cards Assign':    return <CardsAssignForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Cards Assign':    return <CardsAssignForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     case 'Wrapped':         return <WrappedForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     case 'Data Copy':       return <DataCopyForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
-    case 'Sorting':         return <SortingStageForm existing={existing} editing={editing} onSubmit={onSubmit} />
+    case 'Sorting':         return <SortingStageForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     case 'Editing':         return <EditingStageForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     case 'Delivered':       return <DeliveredStageForm existing={existing} shoot={shoot} editing={editing} onSubmit={onSubmit} />
     default:                return null
@@ -1442,17 +1560,53 @@ export function WorkflowTimeline({ shoot, onStage, onStageFormSubmit, readOnly =
   const [selected, setSelected] = useState<WorkflowStage | null>(null)
   // Which submitted stage is currently being edited (prefilled, editable form).
   const [editingStage, setEditingStage] = useState<WorkflowStage | null>(null)
+  // Blocking message shown when a stage can't be submitted yet (e.g. shoot day
+  // reached before the scheduled date).
+  const [blockMsg, setBlockMsg] = useState('')
+
+  // The scheduled shoot date (Schedule stage, falling back to Inquiry / the
+  // shoot's top-level date). Returns a Date at local midnight, or null.
+  const scheduledDate = (): Date | null => {
+    const raw =
+      (shoot.stageFormData?.['Schedule']?.shootDate as string) ||
+      (shoot.stageFormData?.['Inquiry']?.eventDate as string) ||
+      shoot.date ||
+      ''
+    if (!raw) return null
+    const d = new Date(raw)
+    if (isNaN(d.getTime())) return null
+    d.setHours(0, 0, 0, 0)
+    return d
+  }
 
   const handleClick = (stage: WorkflowStage) => {
     const item = shoot.workflow[stage]
     // Locked stages can't be opened
     if (item.status === 'locked') return
+    setBlockMsg('')
     setSelected(prev => prev === stage ? null : stage)
     setEditingStage(null) // leave edit mode when switching stages
     onStage(stage)
   }
 
   const handleSubmit = (stage: WorkflowStage, data: Record<string, unknown>) => {
+    // Guard: the actual shoot (Shoot Day Notes) can't be started before the
+    // scheduled date. Editing an already-submitted stage is still allowed.
+    const isFresh = editingStage !== stage && !shoot.stageFormData?.[stage]
+    if (isFresh && stage === 'Shoot Day Notes') {
+      const sd = scheduledDate()
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      if (sd && today < sd) {
+        setBlockMsg(
+          `This shoot is scheduled for ${sd.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}. ` +
+          `You can't start the shoot day before the scheduled date.`
+        )
+        return
+      }
+    }
+    setBlockMsg('')
+
     // Was this an edit of an already-submitted stage, or a fresh submission?
     const wasEdit = editingStage === stage || !!shoot.stageFormData?.[stage]
     onStageFormSubmit?.(stage, data)
@@ -1558,17 +1712,22 @@ export function WorkflowTimeline({ shoot, onStage, onStageFormSubmit, readOnly =
               You have read-only access. An admin needs to add you to a team before you can edit stages.
             </p>
           ) : (
-            <StageForm
-              // Remount the form whenever the stage, edit-mode, or saved data
-              // changes so each field's local state is re-seeded from `existing`.
-              // Without this React reuses the instance and shows stale values.
-              key={`${selected}-${isEditing ? 'edit' : 'view'}-${shoot.updatedAt ?? ''}-${dataVersion(shoot.stageFormData?.[selected])}`}
-              stage={selected}
-              existing={shoot.stageFormData?.[selected]}
-              shoot={shoot}
-              editing={isEditing}
-              onSubmit={(data) => handleSubmit(selected, data)}
-            />
+            <>
+              <StageForm
+                // Remount the form whenever the stage, edit-mode, or saved data
+                // changes so each field's local state is re-seeded from `existing`.
+                // Without this React reuses the instance and shows stale values.
+                key={`${selected}-${isEditing ? 'edit' : 'view'}-${shoot.updatedAt ?? ''}-${dataVersion(shoot.stageFormData?.[selected])}`}
+                stage={selected}
+                existing={shoot.stageFormData?.[selected]}
+                shoot={shoot}
+                editing={isEditing}
+                onSubmit={(data) => handleSubmit(selected, data)}
+              />
+              {blockMsg && (
+                <p style={{ color: 'crimson', fontSize: 12, margin: '8px 0 0' }}>{blockMsg}</p>
+              )}
+            </>
           )}
         </div>
         )

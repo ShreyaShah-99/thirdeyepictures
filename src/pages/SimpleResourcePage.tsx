@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Clock, Package, Pencil, Plus, ShieldOff, Trash2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, Eye, Package, Pencil, Plus, ShieldOff, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { activityApi, crewApi, equipmentApi, hardDrivesApi, sdCardsApi, shootsApi, usersApi, type Equipment, type RegisteredUser } from '../api'
@@ -541,6 +541,129 @@ function BorrowModal({ kind, item, onClose, onBorrow }: {
   )
 }
 
+// ─── View Details Modal (sd / hard / equipment) ──────────────────────────────
+// Read-only activity/history for a single device: borrow dates, current usage,
+// and per-shoot history where available.
+function DetailRow({ label, value }: { label: string; value?: string | number | null }) {
+  if (value === undefined || value === null || value === '') return null
+  return (
+    <div className="view-field" style={{ marginBottom: 6 }}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  )
+}
+
+function ViewDetailsModal({ kind, item, currentShoot, onClose }: {
+  kind: 'sd' | 'hard' | 'equipment'
+  item: any | null
+  currentShoot?: string
+  onClose: () => void
+}) {
+  const title =
+    kind === 'sd'   ? `SD Card ${item?.number ?? ''} — Details`
+  : kind === 'hard' ? `Hard Drive ${item?.name ?? ''} — Details`
+  :                   `Equipment ${item?.name ?? ''} — Details`
+
+  // SD card shoot usage history (array of { shootName, date, member }).
+  const sdHistory: any[] = Array.isArray(item?.history) ? item.history : []
+  // Hard drive shoot list (array of { shootName, client, date, folder, size, backup }).
+  const hdShoots: any[] = Array.isArray(item?.shoots) ? item.shoots : []
+
+  const isBorrowed = item?.status === 'Borrowed'
+
+  return (
+    <Modal open={!!item} title={title} onClose={onClose}>
+      {item && (
+        <div className="stage-form-view">
+          {/* Common fields */}
+          <div className="form-grid">
+            <DetailRow label="Status" value={item.status} />
+            {kind === 'sd'   && <DetailRow label="Brand" value={item.brand} />}
+            {kind === 'sd'   && <DetailRow label="Capacity" value={item.capacity} />}
+            {kind === 'sd'   && <DetailRow label="Serial" value={item.serial} />}
+            {kind === 'hard' && <DetailRow label="Brand" value={item.brand} />}
+            {kind === 'hard' && <DetailRow label="Capacity" value={item.capacity != null ? `${item.capacity} TB` : ''} />}
+            {kind === 'hard' && <DetailRow label="Used" value={item.used != null ? `${item.used} TB` : ''} />}
+            {kind === 'hard' && <DetailRow label="Location" value={item.location} />}
+            {kind === 'equipment' && <DetailRow label="Type" value={item.type} />}
+            <DetailRow label="Owner" value={item.owner} />
+            {kind === 'equipment' && currentShoot && <DetailRow label="Currently on shoot" value={currentShoot} />}
+          </div>
+
+          {/* Borrow activity — sd + equipment */}
+          {(kind === 'sd' || kind === 'equipment') && (isBorrowed || item.borrowedBy) && (
+            <div style={{ marginTop: 10 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 6 }}>
+                Borrow Activity
+              </span>
+              <div className="form-grid">
+                <DetailRow label="Borrowed By" value={item.borrowedBy} />
+                <DetailRow label="Pickup Date" value={item.pickupDate} />
+                <DetailRow label="Expected Return" value={item.returnDate} />
+              </div>
+              <DetailRow label="Borrow Notes" value={item.borrowNotes} />
+            </div>
+          )}
+
+          {/* SD card shoot history */}
+          {kind === 'sd' && (
+            <div style={{ marginTop: 10 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 6 }}>
+                Shoot History
+              </span>
+              {sdHistory.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#938b87', margin: 0 }}>No shoot history yet.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {sdHistory.map((h, i) => (
+                    <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px' }}>
+                      <strong style={{ fontSize: 13 }}>{h.shootName ?? 'Shoot'}</strong>
+                      <div style={{ fontSize: 11, color: '#625b58', marginTop: 2 }}>
+                        {h.date || '—'}{h.member ? ` · ${h.member}` : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Hard drive shoot list */}
+          {kind === 'hard' && (
+            <div style={{ marginTop: 10 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: '#625b58', display: 'block', marginBottom: 6 }}>
+                Shoots on this Drive
+              </span>
+              {hdShoots.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#938b87', margin: 0 }}>No shoots stored on this drive yet.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {hdShoots.map((s, i) => (
+                    <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <strong style={{ fontSize: 13, flex: 1 }}>{s.shootName ?? 'Shoot'}</strong>
+                        {s.backup && <Badge tone={s.backup === 'Completed' ? 'success' : 'warning'}>{s.backup}</Badge>}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#625b58', marginTop: 2 }}>
+                        {s.client ? `${s.client} · ` : ''}{s.date || '—'}
+                        {s.folder ? ` · ${s.folder}` : ''}{s.size != null ? ` · ${s.size} TB` : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="modal-actions">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>Close</button>
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export function SimpleResourcePage({
   title,
@@ -712,6 +835,8 @@ export function SimpleResourcePage({
 
   // Borrow / Return (sd + equipment only)
   const [borrowTarget, setBorrowTarget] = useState<any | null>(null)
+  // View Details (sd / hard / equipment) — shows activity/history in a modal.
+  const [detailsTarget, setDetailsTarget] = useState<any | null>(null)
   // Team: member whose shoot list is shown in a popup.
   const [memberShootsTarget, setMemberShootsTarget] = useState<{ name: string; shoots: MemberShoot[] } | null>(null)
 
@@ -825,11 +950,16 @@ export function SimpleResourcePage({
                     {canWrite && (
                       <td className="inv-action-col">
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                          {kind !== 'team' && (
+                            <button type="button" className="icon-btn" title={`View details for ${r.name}`} onClick={() => setDetailsTarget(findRaw(r.id))}>
+                              <Eye size={14} />
+                            </button>
+                          )}
                           {(kind === 'sd' || kind === 'equipment') && (
                             r.status === 'Borrowed' ? (
-                              <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => handleReturn(r.id)}>Return</button>
+                              <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '3px 10px', width: 84, textAlign: 'center' }} onClick={() => handleReturn(r.id)}>Return</button>
                             ) : (
-                              <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setBorrowTarget(findRaw(r.id))}>Checkout</button>
+                              <button type="button" className="btn btn-secondary" style={{ fontSize: 11, padding: '3px 10px', width: 84, textAlign: 'center' }} onClick={() => setBorrowTarget(findRaw(r.id))}>Checkout</button>
                             )
                           )}
                           {kind !== 'team' && (
@@ -929,6 +1059,15 @@ export function SimpleResourcePage({
           item={borrowTarget}
           onClose={() => setBorrowTarget(null)}
           onBorrow={handleEditSave}
+        />
+      )}
+
+      {kind !== 'team' && (
+        <ViewDetailsModal
+          kind={kind}
+          item={detailsTarget}
+          currentShoot={kind === 'equipment' && detailsTarget ? shootByEquipment[detailsTarget.name] : undefined}
+          onClose={() => setDetailsTarget(null)}
         />
       )}
 

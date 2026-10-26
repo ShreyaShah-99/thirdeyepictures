@@ -48,6 +48,32 @@ export function ShootDetails() {
     return {}
   }
 
+  // Mirror a stage's submitted data onto the shoot's TOP-LEVEL fields so the
+  // details header and later stages reflect what was entered.
+  // - Inquiry sets the initial name/client/type/date/time.
+  // - Schedule (being more specific) overrides date/time/venue/city.
+  // Only non-empty values overwrite, so later stages don't wipe earlier data.
+  const topLevelFromStage = (s: WorkflowStage, data: Record<string, unknown>): Partial<Shoot> => {
+    const pick = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+    const out: Partial<Shoot> = {}
+    if (s === 'Inquiry') {
+      const set = (k: keyof Shoot, v?: string) => { if (v !== undefined) (out as any)[k] = v }
+      set('name', pick(data.eventName))
+      set('client', pick(data.clientName))
+      set('type', pick(data.eventType))
+      set('date', pick(data.eventDate))
+      set('time', pick(data.eventTime))
+    }
+    if (s === 'Schedule') {
+      const set = (k: keyof Shoot, v?: string) => { if (v !== undefined) (out as any)[k] = v }
+      set('date', pick(data.shootDate))
+      set('time', pick(data.startTime))
+      set('venue', pick(data.venue))
+      set('city', pick(data.city))
+    }
+    return out
+  }
+
   const handleStageFormSubmit = async (s: WorkflowStage, data: Record<string, unknown>) => {
     // Can't submit a locked stage.
     if (shoot.workflow[s].status === 'locked') return
@@ -59,6 +85,7 @@ export function ShootDetails() {
       const updated: Partial<Shoot> = {
         stageFormData: { ...shoot.stageFormData, [s]: data },
         ...resourceIdsFromStage(s, data),
+        ...topLevelFromStage(s, data),
       }
       try {
         const saved = await shootsApi.update(shoot.id, updated)
@@ -97,6 +124,7 @@ export function ShootDetails() {
       currentStage: isLastStage ? s : nextStage,
       workflow,
       ...resourceIdsFromStage(s, data),
+      ...topLevelFromStage(s, data),
     }
     try {
       const saved = await shootsApi.update(shoot.id, updated)

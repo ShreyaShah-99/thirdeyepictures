@@ -78,6 +78,42 @@ export function resendCode(username: string): Promise<void> {
   })
 }
 
+// ─── Forgot / reset password ────────────────────────────────────────────────
+
+/**
+ * Start a password reset. Cognito emails/SMSes a verification code to the
+ * account. Accepts a username, email alias, or phone alias (normalized the
+ * same way as login).
+ */
+export function forgotPassword(identifier: string): Promise<void> {
+  const username = normalizeIdentifier(identifier)
+  const user = new CognitoUser({ Username: username, Pool: userPool })
+  return new Promise((resolve, reject) => {
+    user.forgotPassword({
+      onSuccess: () => resolve(),
+      onFailure: (err) => reject(err),
+    })
+  })
+}
+
+/**
+ * Complete a password reset using the emailed code and a new password.
+ */
+export function confirmForgotPassword(
+  identifier: string,
+  code: string,
+  newPassword: string,
+): Promise<void> {
+  const username = normalizeIdentifier(identifier)
+  const user = new CognitoUser({ Username: username, Pool: userPool })
+  return new Promise((resolve, reject) => {
+    user.confirmPassword(code, newPassword, {
+      onSuccess: () => resolve(),
+      onFailure: (err) => reject(err),
+    })
+  })
+}
+
 export interface CognitoProfile {
   id: string
   email: string
