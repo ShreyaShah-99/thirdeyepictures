@@ -188,4 +188,6 @@ export interface Notification {
   /** Target user this notification was addressed to (null = broadcast). */
   userEmail?: string | null
   userName?: string | null
+  /** Optional shoot this notification links to (enables a "View Shoot" action). */
+  shootId?: string | null
 }

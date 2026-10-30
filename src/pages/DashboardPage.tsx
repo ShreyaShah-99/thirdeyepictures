@@ -5,6 +5,7 @@ import {
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { activityApi, shootsApi } from '../api'
+import { useAuth } from '../auth'
 import { AppLayout, Badge, MiniStat, PageHeader, SectionTitle } from '../components'
 import { formatActivityIST } from '../data'
 import { Loader } from '../Spinner'
@@ -24,9 +25,13 @@ function dateBox(raw?: string): { day: string; mon: string } {
 
 export function Dashboard() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [shoots, setShoots] = useState<Shoot[]>([])
   const [activities, setActivities] = useState<Activity[]>([])
   const [loading, setLoading] = useState(true)
+
+  // First name for a friendly greeting, falling back to the full name.
+  const firstName = (user?.name ?? '').trim().split(/\s+/)[0] || 'there'
 
   useEffect(() => {
     Promise.all([
@@ -53,13 +58,21 @@ export function Dashboard() {
     delivered: shoots.filter(isDelivered).length,
   }
 
-  // Delivered shoots are done — exclude them from the upcoming list.
-  const upcomingShoots = shoots.filter(s => !isDelivered(s))
+  // Delivered shoots are done — exclude them from the upcoming list, and sort
+  // by date (earliest first). Shoots with no/unparseable date sort to the end.
+  const dateValue = (raw?: string) => {
+    if (!raw) return Infinity
+    const t = new Date(raw).getTime()
+    return Number.isNaN(t) ? Infinity : t
+  }
+  const upcomingShoots = shoots
+    .filter(s => !isDelivered(s))
+    .sort((a, b) => dateValue(a.date) - dateValue(b.date))
 
   return (
     <AppLayout>
       <PageHeader
-        title="Dashboard"
+        title={`Hi ${firstName}`}
         subtitle="A quick view of today's production operations"
         action={
           <Link to="/shoots" className="btn btn-primary">
@@ -70,12 +83,12 @@ export function Dashboard() {
 
       <div className="stats-grid">
         <MiniStat label="Total Shoots"  value={counts.total}     icon={Camera}      detail="Across all projects" />
-        <MiniStat label="Upcoming"      value={counts.upcoming}  icon={CalendarDays} detail="Scheduled / enquiry" />
+        <MiniStat label="Upcoming"      value={counts.upcoming}  icon={CalendarDays} detail="Scheduled / enquiry" className="mobile-keep" />
         <MiniStat label="In Progress"   value={counts.progress}  icon={Play}        detail="Currently shooting" />
         <MiniStat label="Wrapped"       value={counts.wrapped}   icon={Check}       detail="Awaiting post-production" />
-        <MiniStat label="Data Copy"     value={counts.data}      icon={HardDrive}   detail="Storage action needed" />
-        <MiniStat label="Sorting"       value={counts.sorting}   icon={ListFilter}  detail="Selection in progress" />
-        <MiniStat label="Editing"       value={counts.editing}   icon={Edit3}       detail="Post-production" />
+        <MiniStat label="Data Copy"     value={counts.data}      icon={HardDrive}   detail="Storage action needed" className="mobile-keep" />
+        <MiniStat label="Sorting"       value={counts.sorting}   icon={ListFilter}  detail="Selection in progress" className="mobile-keep" />
+        <MiniStat label="Editing"       value={counts.editing}   icon={Edit3}       detail="Post-production" className="mobile-keep" />
         <MiniStat label="Delivered"     value={counts.delivered} icon={ShieldCheck} detail="Closed successfully" />
       </div>
 

@@ -300,7 +300,7 @@ function AddHardDriveModal({ open, onClose, onAdd }: {
 function AddEquipmentModal({ open, onClose, onAdd }: {
   open: boolean; onClose: () => void; onAdd: (e: Equipment) => void | Promise<void>
 }) {
-  const blank = { name: '', type: 'Camera Body', owner: '' }
+  const blank = { name: '', type: 'Camera', owner: '' }
   const [form, setForm] = useState(blank)
   const [saving, setSaving] = useState(false)
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -334,7 +334,7 @@ function AddEquipmentModal({ open, onClose, onAdd }: {
         </FormField>
         <FormField label="Type">
           <select value={form.type} onChange={set('type')}>
-            {['Camera Body','Lens','Light','Audio','Stabilizer','Drone','Accessory','Other'].map(t =>
+            {EQUIP_TYPES.map(t =>
               <option key={t}>{t}</option>
             )}
           </select>
@@ -376,7 +376,7 @@ function DeleteConfirmModal({ open, name, onClose, onConfirm }: {
 const SD_STATUSES = ['Available','Assigned','In Use','Data Copy Pending','Data Copied','Damaged','Lost','Retired']
 const HD_STATUSES = ['Available','In Use','Full','Backup Pending','Backup Completed','Damaged','Lost','Retired']
 const EQUIP_STATUSES = ['Available','In Use','Under Repair','Retired']
-const EQUIP_TYPES = ['Camera Body','Lens','Light','Audio','Stabilizer','Drone','Accessory','Other']
+const EQUIP_TYPES = ['Camera','Lense','Gimbal','Drone','Light','Mic','Battery','Charger','Stand','Tripod','Monopod','TE Standee','Card','Hard Drive','Bag','Accessories','Gadget','Other']
 const SD_CAPACITIES = ['32 GB','64 GB','128 GB','256 GB','512 GB','1 TB']
 const HD_BRANDS = ['Samsung','WD','Seagate','LaCie','SanDisk','Toshiba']
 

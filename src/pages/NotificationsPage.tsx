@@ -1,5 +1,6 @@
 import { Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { notificationsApi } from '../api'
 import { useAuth } from '../auth'
 import { AppLayout, PageHeader, Pagination, usePagination } from '../components'
@@ -66,6 +67,16 @@ export function NotificationsPage() {
               <strong>{n.title}</strong>
               <span>{n.detail}</span>
               <small>{n.time}</small>
+              {n.shootId && (
+                <Link
+                  to={`/shoots/${n.shootId}`}
+                  className="btn btn-secondary"
+                  style={{ fontSize: 11, padding: '3px 10px', marginTop: 8, alignSelf: 'flex-start' }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  View Shoot
+                </Link>
+              )}
             </div>
             {!n.read && <span className="unread" />}
             {isSuperAdmin && (

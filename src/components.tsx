@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import React, { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { activityApi, crewApi, equipmentApi, notificationsApi, sdCardsApi, shootsApi, tasksApi } from './api'
+import { activityApi, crewApi, equipmentApi, hardDrivesApi, notificationsApi, sdCardsApi, shootsApi, tasksApi } from './api'
 import logoImg from './assets/Images/ThirdEye_Logo.png'
 import { useAuth } from './auth'
 import { SHOOT_TYPE_GROUPS, workflowStages } from './data'
@@ -996,7 +996,7 @@ function WrappedForm({ existing, shoot, editing, onSubmit }: { existing?: Record
 }
 
 function DataCopyForm({ existing, shoot, editing, onSubmit }: { existing?: Record<string, unknown>; shoot?: Shoot; editing?: boolean; onSubmit: (d: Record<string, unknown>) => void }) {
-  const { members, sdCards, hardDrives } = useResources()
+  const { members, sdCards, hardDrives, refresh } = useResources()
   type CardCopyEntry = { cardId: string; assignedTo: string; status: string }
 
   // Get assigned cards from Cards Assign stage, falling back to non-Available sdCards
@@ -1025,6 +1025,52 @@ function DataCopyForm({ existing, shoot, editing, onSubmit }: { existing?: Recor
 
   const setCardStatus = (cardId: string, status: string) => {
     setCardCopyStatus(prev => prev.map(e => e.cardId === cardId ? { ...e, status } : e))
+  }
+
+  // Completing Data Copy means the footage is off the cards — free them back to
+  // Available in the SD Cards table so they can be used on other shoots.
+  // Also record shoot history on each card and on the destination hard drive
+  // so the View Details modals show what passed through them.
+  const submitDataCopy = async () => {
+    const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+
+    // SD cards: free them AND append a history entry (dedup by shootId).
+    await Promise.all(
+      cardCopyStatus.map(e => {
+        const card = sdCards.find(c => c.id === e.cardId)
+        const prevHistory = Array.isArray(card?.history) ? card!.history : []
+        const already = prevHistory.some(h => h.shootId === shoot?.id)
+        const memberName = members.find(m => m.id === e.assignedTo)?.name ?? ''
+        const history = already ? prevHistory : [
+          ...prevHistory,
+          { shootId: shoot?.id ?? '', shootName: shoot?.name ?? '', date: today, member: memberName },
+        ]
+        return sdCardsApi.update(e.cardId, { status: 'Available', history } as any)
+          .catch((err: unknown) => console.error('Failed to update SD card after data copy:', err))
+      })
+    )
+
+    // Hard drive: append this shoot to its `shoots` history (dedup by shootId).
+    if (driveId) {
+      const drive = hardDrives.find(h => h.id === driveId)
+      const prevShoots = Array.isArray(drive?.shoots) ? drive!.shoots : []
+      if (!prevShoots.some(s => s.shootId === shoot?.id)) {
+        const entry = {
+          shootId: shoot?.id ?? '',
+          shootName: shoot?.name ?? '',
+          client: shoot?.client ?? '',
+          date: today,
+          folder: folderPath ?? '',
+          size: 0,
+          backup: 'Pending' as const,
+        }
+        await hardDrivesApi.update(driveId, { shoots: [...prevShoots, entry] } as any)
+          .catch((err: unknown) => console.error('Failed to update hard drive history:', err))
+      }
+    }
+
+    onSubmit({ cardCopyStatus, driveId, folderPath, notes })
+    refresh() // re-pull so the lists reflect the new statuses/history
   }
 
   const ordinal = (n: number) => {
@@ -1129,7 +1175,7 @@ function DataCopyForm({ existing, shoot, editing, onSubmit }: { existing?: Recor
         <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Transfer notes..." />
       </FormField>
       <div className="modal-actions" style={{ marginTop: 8 }}>
-        <button type="button" className="btn btn-primary" onClick={() => onSubmit({ cardCopyStatus, driveId, folderPath, notes })}>
+        <button type="button" className="btn btn-primary" onClick={submitDataCopy}>
           <Check size={14}/> Mark Copy Completed
         </button>
       </div>
@@ -1856,8 +1902,8 @@ export function ShootSummary({ shoot }: { shoot: Shoot }) {
   </div>
 }
 
-export function MiniStat({ label, value, icon: Icon, detail }: { label:string; value:string|number; icon:any; detail?:string }) {
-  return <div className="stat-card"><div className="stat-icon"><Icon size={18}/></div><div><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div></div>
+export function MiniStat({ label, value, icon: Icon, detail, className }: { label:string; value:string|number; icon:any; detail?:string; className?:string }) {
+  return <div className={cx('stat-card', className)}><div className="stat-icon"><Icon size={18}/></div><div><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div></div>
 }
 
 export function SectionTitle({ title, action }: { title:string; action?:ReactNode }) {
