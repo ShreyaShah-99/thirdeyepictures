@@ -90,15 +90,25 @@ export function AppLayout({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <aside className={cx('sidebar', mobileOpen && 'sidebar-open')}>
         <div className="brand">
-          <img src={logoImg} alt="Third Eye Photography" className="sidebar-logo" />
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            title="Reload app"
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex' }}
+          >
+            <img src={logoImg} alt="Third Eye Photography" className="sidebar-logo" />
+          </button>
         </div>
         <nav className="nav">
-          {nav.map(([label, path, Icon]) => (
-            <NavLink key={path} to={path} end={path === '/'} onClick={() => setMobileOpen(false)} className={({isActive}) => cx('nav-item', isActive && 'active')}>
-              <Icon size={17} strokeWidth={1.8} />
-              <span>{label}</span>
-            </NavLink>
-          ))}
+          {nav
+            // Viewers (not yet on a team) only get the Dashboard.
+            .filter(([, path]) => user?.accessLevel !== 'viewer' || path === '/')
+            .map(([label, path, Icon]) => (
+              <NavLink key={path} to={path} end={path === '/'} onClick={() => setMobileOpen(false)} className={({isActive}) => cx('nav-item', isActive && 'active')}>
+                <Icon size={17} strokeWidth={1.8} />
+                <span>{label}</span>
+              </NavLink>
+            ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="user-mini">
@@ -124,6 +134,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <button className="mobile-menu icon-btn" onClick={() => setMobileOpen(true)}><Menu size={20}/></button>
           <div className="topbar-title">Production workspace</div>
           <div className="topbar-actions">
+            {user?.accessLevel !== 'viewer' && (
             <Link className="icon-btn" to="/notifications" style={{ position: 'relative' }} title={unread ? `${unread} unread` : 'Notifications'}>
               <Bell size={18}/>
               {unread > 0 && (
@@ -139,6 +150,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 </span>
               )}
             </Link>
+            )}
             <div className="top-avatar">{user?.initials ?? 'AU'}</div>
           </div>
         </header>
@@ -146,7 +158,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           {user?.accessLevel === 'viewer' && (
             <div className="role-notice" style={{ marginBottom: 16 }}>
               <Shield size={14} />
-              <span>You have read-only access. An admin needs to add you to the team to enable editing.</span>
+              <span>You're not on a team yet, so you can only see the Dashboard. An admin needs to add you to the team to unlock the rest.</span>
             </div>
           )}
           {children}

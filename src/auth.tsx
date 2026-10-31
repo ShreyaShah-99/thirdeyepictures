@@ -155,6 +155,15 @@ export function useCanWrite(): boolean {
 }
 
 /**
+ * A "viewer" is a self-registered user not yet added to a team. They get
+ * Dashboard-only access — no Shoots, Calendar, Team, Equipment, etc.
+ */
+export function useIsViewer(): boolean {
+  const { user } = useAuth()
+  return user?.accessLevel === 'viewer'
+}
+
+/**
  * Permission helper. 'admin' can do everything; 'team' can write but not
  * admin-only actions; 'viewer' is read-only.
  */
